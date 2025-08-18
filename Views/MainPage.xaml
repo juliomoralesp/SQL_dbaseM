@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="SqlServerManager.Mobile.Views.MainPage"
+             Title="SQL Server Manager">
+
+    <Grid RowDefinitions="Auto,*,Auto">
+        <!-- Toolbar -->
+        <HorizontalStackLayout Grid.Row="0" 
+                              Padding="10" 
+                              BackgroundColor="{StaticResource Primary}"
+                              Spacing="10">
+            <Button Text="Connect" 
+                    x:Name="ConnectButton"
+                    Clicked="OnConnectClicked"
+                    BackgroundColor="{StaticResource Secondary}"
+                    TextColor="White"/>
+            
+            <Button Text="Disconnect" 
+                    x:Name="DisconnectButton"
+                    Clicked="OnDisconnectClicked"
+                    BackgroundColor="{StaticResource Secondary}"
+                    TextColor="White"
+                    IsEnabled="False"/>
+            
+            <Button Text="Refresh" 
+                    x:Name="RefreshButton"
+                    Clicked="OnRefreshClicked"
+                    BackgroundColor="{StaticResource Secondary}"
+                    TextColor="White"
+                    IsEnabled="False"/>
+            
+            <Label Text="Not Connected" 
+                   x:Name="ConnectionLabel"
+                   VerticalOptions="Center"
+                   TextColor="Red"
+                   FontAttributes="Bold"/>
+        </HorizontalStackLayout>
+
+        <!-- Main Content - Tab View -->
+        <Grid Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Tab Headers -->
+            <HorizontalStackLayout Grid.Row="0" Spacing="0">
+                <Button Text="Databases" 
+                        x:Name="DatabasesTabButton"
+                        Clicked="OnDatabasesTabClicked"
+                        BackgroundColor="{StaticResource Primary}"
+                        TextColor="White"
+                        CornerRadius="0"
+                        WidthRequest="150"/>
+                
+                <Button Text="Tables &amp; Columns" 
+                        x:Name="TablesTabButton"
+                        Clicked="OnTablesTabClicked"
+                        BackgroundColor="{StaticResource Gray500}"
+                        TextColor="White"
+                        CornerRadius="0"
+                        WidthRequest="150"/>
+            </HorizontalStackLayout>
+
+            <!-- Tab Content -->
+            <Grid Grid.Row="1" x:Name="TabContent">
+                <!-- Databases View -->
+                <VerticalStackLayout x:Name="DatabasesView" IsVisible="True">
+                    <Label Text="Databases:" 
+                           FontSize="18" 
+                           FontAttributes="Bold"
+                           Padding="10"/>
+                    
+                    <CollectionView x:Name="DatabasesCollectionView"
+                                   SelectionMode="Single"
+                                   SelectionChanged="OnDatabaseSelectionChanged">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Padding="10">
+                                    <Grid.GestureRecognizers>
+                                        <TapGestureRecognizer NumberOfTapsRequired="2" 
+                                                            Tapped="OnDatabaseDoubleTapped"/>
+                                        <TapGestureRecognizer NumberOfTapsRequired="1" 
+                                                            Tapped="OnDatabaseTapped"
+                                                            Buttons="Secondary"/>
+                                    </Grid.GestureRecognizers>
+                                    <Frame BorderColor="{StaticResource Gray300}" 
+                                           Padding="10"
+                                           BackgroundColor="{StaticResource Gray100}">
+                                        <Label Text="{Binding Name}" 
+                                               FontSize="16"/>
+                                    </Frame>
+                                </Grid>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </VerticalStackLayout>
+
+                <!-- Tables & Columns View -->
+                <Grid x:Name="TablesView" IsVisible="False">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Tables Section -->
+                    <VerticalStackLayout Grid.Row="0">
+                        <Label Text="Tables:" 
+                               FontSize="18" 
+                               FontAttributes="Bold"
+                               Padding="10"/>
+                        
+                        <CollectionView x:Name="TablesCollectionView"
+                                       SelectionMode="Single"
+                                       SelectionChanged="OnTableSelectionChanged">
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Padding="5">
+                                        <Frame BorderColor="{StaticResource Gray300}" 
+                                               Padding="10">
+                                            <HorizontalStackLayout Spacing="10">
+                                                <Label Text="{Binding TableName}" 
+                                                       FontSize="14"/>
+                                                <Label Text="{Binding TableSchema}" 
+                                                       FontSize="12"
+                                                       TextColor="{StaticResource Gray600}"/>
+                                            </HorizontalStackLayout>
+                                        </Frame>
+                                    </Grid>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </VerticalStackLayout>
+
+                    <!-- Splitter -->
+                    <BoxView Grid.Row="1" 
+                             HeightRequest="2"
+                             BackgroundColor="{StaticResource Gray400}"/>
+
+                    <!-- Columns Section -->
+                    <VerticalStackLayout Grid.Row="2">
+                        <Label Text="Columns:" 
+                               FontSize="18" 
+                               FontAttributes="Bold"
+                               Padding="10"/>
+                        
+                        <CollectionView x:Name="ColumnsCollectionView">
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Padding="5">
+                                        <Frame BorderColor="{StaticResource Gray300}" 
+                                               Padding="10">
+                                            <Grid ColumnDefinitions="*,*,Auto,Auto">
+                                                <Label Grid.Column="0" 
+                                                       Text="{Binding ColumnName}" 
+                                                       FontSize="14"/>
+                                                <Label Grid.Column="1" 
+                                                       Text="{Binding DataType}" 
+                                                       FontSize="12"
+                                                       TextColor="{StaticResource Gray600}"/>
+                                                <Label Grid.Column="2" 
+                                                       Text="{Binding MaxLength}" 
+                                                       FontSize="12"
+                                                       TextColor="{StaticResource Gray600}"/>
+                                                <Label Grid.Column="3" 
+                                                       Text="{Binding IsNullable}" 
+                                                       FontSize="12"
+                                                       TextColor="{StaticResource Gray600}"/>
+                                            </Grid>
+                                        </Frame>
+                                    </Grid>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </VerticalStackLayout>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <!-- Status Bar -->
+        <HorizontalStackLayout Grid.Row="2" 
+                              BackgroundColor="{StaticResource Gray200}"
+                              Padding="10,5">
+            <Label x:Name="StatusLabel" 
+                   Text="Ready"
+                   VerticalOptions="Center"/>
+        </HorizontalStackLayout>
+    </Grid>
+
+</ContentPage>

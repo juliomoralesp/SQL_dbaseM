@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="SqlServerManager.Mobile.Views.ConnectionPage"
+             Title="Connect to SQL Server">
+
+    <ScrollView Padding="20">
+        <VerticalStackLayout Spacing="15">
+            
+            <Label Text="SQL Server Connection" 
+                   FontSize="24" 
+                   FontAttributes="Bold"
+                   HorizontalOptions="Center"/>
+
+            <!-- Server Name -->
+            <VerticalStackLayout Spacing="5">
+                <Label Text="Server Name:" FontAttributes="Bold"/>
+                <Entry x:Name="ServerNameEntry" 
+                       Placeholder="e.g., localhost, .\SQLEXPRESS, or server IP"
+                       Text="localhost"/>
+            </VerticalStackLayout>
+
+            <!-- Authentication Type -->
+            <VerticalStackLayout Spacing="5">
+                <Label Text="Authentication:" FontAttributes="Bold"/>
+                <Picker x:Name="AuthTypePicker"
+                        SelectedIndexChanged="OnAuthTypeChanged">
+                    <Picker.Items>
+                        <x:String>Windows Authentication</x:String>
+                        <x:String>SQL Server Authentication</x:String>
+                    </Picker.Items>
+                </Picker>
+            </VerticalStackLayout>
+
+            <!-- SQL Auth Credentials -->
+            <VerticalStackLayout x:Name="SqlAuthSection" 
+                                IsVisible="False" 
+                                Spacing="10">
+                <VerticalStackLayout Spacing="5">
+                    <Label Text="Username:" FontAttributes="Bold"/>
+                    <Entry x:Name="UsernameEntry" 
+                           Placeholder="SQL Server username"/>
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="5">
+                    <Label Text="Password:" FontAttributes="Bold"/>
+                    <Entry x:Name="PasswordEntry" 
+                           Placeholder="SQL Server password"
+                           IsPassword="True"/>
+                </VerticalStackLayout>
+            </VerticalStackLayout>
+
+            <!-- Database (Optional) -->
+            <VerticalStackLayout Spacing="5">
+                <Label Text="Database (Optional):" FontAttributes="Bold"/>
+                <Entry x:Name="DatabaseEntry" 
+                       Placeholder="Initial database to connect to"/>
+            </VerticalStackLayout>
+
+            <!-- Connection Timeout -->
+            <VerticalStackLayout Spacing="5">
+                <Label Text="Connection Timeout (seconds):" FontAttributes="Bold"/>
+                <Entry x:Name="TimeoutEntry" 
+                       Text="30"
+                       Keyboard="Numeric"/>
+            </VerticalStackLayout>
+
+            <!-- Trust Server Certificate (for Android) -->
+            <HorizontalStackLayout Spacing="10">
+                <CheckBox x:Name="TrustCertificateCheckBox" 
+                         IsChecked="True"/>
+                <Label Text="Trust Server Certificate" 
+                       VerticalOptions="Center"/>
+            </HorizontalStackLayout>
+
+            <!-- Buttons -->
+            <Grid ColumnDefinitions="*,*,*" 
+                  ColumnSpacing="10"
+                  Margin="0,20,0,0">
+                <Button Grid.Column="0" 
+                        Text="Test Connection" 
+                        Clicked="OnTestConnectionClicked"
+                        BackgroundColor="{StaticResource Secondary}"/>
+                
+                <Button Grid.Column="1" 
+                        Text="Connect" 
+                        Clicked="OnConnectClicked"
+                        BackgroundColor="{StaticResource Primary}"/>
+                
+                <Button Grid.Column="2" 
+                        Text="Cancel" 
+                        Clicked="OnCancelClicked"
+                        BackgroundColor="{StaticResource Gray500}"/>
+            </Grid>
+
+            <!-- Status Label -->
+            <Label x:Name="StatusLabel" 
+                   HorizontalOptions="Center"
+                   Margin="0,10,0,0"
+                   FontAttributes="Italic"/>
+
+            <!-- Saved Connections -->
+            <VerticalStackLayout Spacing="10" 
+                                Margin="0,20,0,0">
+                <Label Text="Recent Connections:" 
+                       FontAttributes="Bold"
+                       FontSize="18"/>
+                
+                <CollectionView x:Name="SavedConnectionsView"
+                               SelectionMode="Single"
+                               SelectionChanged="OnSavedConnectionSelected"
+                               HeightRequest="150">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate>
+                            <Frame BorderColor="{StaticResource Gray300}" 
+                                   Padding="10"
+                                   Margin="0,2">
+                                <Label Text="{Binding DisplayName}" 
+                                       FontSize="14"/>
+                            </Frame>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+            </VerticalStackLayout>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>
