@@ -328,3 +328,5 @@ node_modules/
 SqlServerManager-Standalone/
 NET8-Standalone/
 Properties/
+
+*.zip
