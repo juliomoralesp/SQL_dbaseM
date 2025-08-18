@@ -33,7 +33,7 @@
 
   <ItemGroup>
     <!-- App Icon -->
-    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+    <MauiIcon Include="Resources\AppIcon\appicon.svg" Color="#512BD4" />
 
     <!-- Splash Screen -->
     <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
@@ -53,8 +53,21 @@
     <PackageReference Include="Microsoft.Maui.Controls" Version="8.0.90" />
     <PackageReference Include="Microsoft.Maui.Controls.Compatibility" Version="8.0.90" />
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.0" />
-    <PackageReference Include="System.Data.SqlClient" Version="4.8.6" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.1" />
     <PackageReference Include="CommunityToolkit.Maui" Version="9.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Exclude Windows Forms files from MAUI project -->
+    <Compile Remove="MainForm.cs" />
+    <Compile Remove="Program.cs" />
+    <Compile Remove="ConnectionDialog.cs" />
+    <Compile Remove="CreateDatabaseDialog.cs" />
+    <Compile Remove="DatabasePropertiesDialog.cs" />
+    <Compile Remove="InputDialog.cs" />
+    <Compile Remove="TableEditorDialog.cs" />
+    <Compile Remove="FontManager.cs" />
+    <Compile Remove="ThemeManager.cs" />
   </ItemGroup>
 
 </Project>

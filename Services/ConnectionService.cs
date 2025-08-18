@@ -1,5 +1,5 @@
 using SqlServerManager.Mobile.Models;
-using System.Data.SqlClient;
+using Microsoft.Data.SqlClient;
 using System.Text.Json;
 
 namespace SqlServerManager.Mobile.Services

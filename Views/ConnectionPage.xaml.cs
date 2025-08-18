@@ -1,6 +1,7 @@
 using SqlServerManager.Mobile.Services;
 using SqlServerManager.Mobile.Models;
 using System.Collections.ObjectModel;
+using Microsoft.Data.SqlClient;
 
 namespace SqlServerManager.Mobile.Views
 {
@@ -99,7 +100,7 @@ namespace SqlServerManager.Mobile.Views
 
         private string BuildConnectionString()
         {
-            var builder = new System.Data.SqlClient.SqlConnectionStringBuilder();
+            var builder = new SqlConnectionStringBuilder();
             
             builder.DataSource = ServerNameEntry.Text;
             
