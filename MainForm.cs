@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Data.SqlClient;
+using Microsoft.Data.SqlClient;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 using System.Configuration;
 using System.IO;
+using System.Threading.Tasks;
 
 namespace SqlServerManager
 {
@@ -39,10 +40,34 @@ namespace SqlServerManager
 
         public MainForm()
         {
-            InitializeComponent();
-            LoadSavedConnections();
-            LoadSavedSettings();
-            ApplyCurrentSettings();
+            try
+            {
+                LogToFile("MainForm constructor starting...");
+                InitializeComponent();
+                LogToFile("InitializeComponent completed.");
+                
+                LoadSavedConnections();
+                LogToFile("LoadSavedConnections completed.");
+                
+                LoadSavedSettings();
+                LogToFile("LoadSavedSettings completed.");
+                
+                ApplyCurrentSettings();
+                LogToFile("ApplyCurrentSettings completed.");
+                
+                LogToFile("MainForm constructor completed successfully.");
+            }
+            catch (Exception ex)
+            {
+                LogToFile($"Error in MainForm constructor: {ex}");
+                // Try to show a basic form even if theming fails
+                this.Text = "SQL Server Manager (Safe Mode)";
+                this.Size = new Size(1200, 700);
+                this.StartPosition = FormStartPosition.CenterScreen;
+                
+                MessageBox.Show($"Initialization warning: {ex.Message}\n\nRunning in safe mode.", 
+                    "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private void InitializeComponent()
@@ -199,7 +224,7 @@ namespace SqlServerManager
             this.MainMenuStrip = mainMenuStrip;
         }
 
-        private void ConnectButton_Click(object sender, EventArgs e)
+        private async void ConnectButton_Click(object sender, EventArgs e)
         {
             using (var connectionDialog = new ConnectionDialog())
             {
@@ -216,16 +241,22 @@ namespace SqlServerManager
                 
                 if (connectionDialog.ShowDialog() == DialogResult.OK)
                 {
+                    // Disable connect button and show progress
+                    connectButton.Enabled = false;
+                    statusLabel.Text = "Connecting...";
+                    
                     try
                     {
                         currentConnectionString = connectionDialog.ConnectionString;
                         currentConnection = new SqlConnection(currentConnectionString);
-                        currentConnection.Open();
+                        
+                        // Use async open
+                        await currentConnection.OpenAsync();
                         
                         // Test connection
                         using (var command = new SqlCommand("SELECT 1", currentConnection))
                         {
-                            command.ExecuteScalar();
+                            await command.ExecuteScalarAsync();
                         }
                         
                         // Save successful connection
@@ -234,13 +265,12 @@ namespace SqlServerManager
                         // Update UI
                         connectionLabel.Text = $"Connected to: {currentConnection.DataSource}";
                         connectionLabel.ForeColor = Color.Green;
-                        connectButton.Enabled = false;
                         disconnectButton.Enabled = true;
                         refreshButton.Enabled = true;
                         statusLabel.Text = "Connected successfully";
                         
                         // Load databases
-                        LoadDatabases();
+                        await LoadDatabasesAsync();
                     }
                     catch (Exception ex)
                     {
@@ -252,7 +282,16 @@ namespace SqlServerManager
                             currentConnection.Dispose();
                             currentConnection = null;
                         }
+                        
+                        // Re-enable connect button on failure
+                        connectButton.Enabled = true;
+                        statusLabel.Text = "Connection failed";
                     }
+                }
+                else
+                {
+                    // Dialog was cancelled, ensure connect button is enabled
+                    connectButton.Enabled = true;
                 }
             }
         }
@@ -294,25 +333,35 @@ namespace SqlServerManager
             }
         }
 
-        private void RefreshButton_Click(object sender, EventArgs e)
+        private async void RefreshButton_Click(object sender, EventArgs e)
         {
-            LoadDatabases();
-            if (databaseListBox.SelectedItem != null)
+            refreshButton.Enabled = false;
+            statusLabel.Text = "Refreshing...";
+            
+            try
             {
-                LoadTables(databaseListBox.SelectedItem.ToString());
+                await LoadDatabasesAsync();
+                if (databaseListBox.SelectedItem != null)
+                {
+                    await LoadTablesAsync(databaseListBox.SelectedItem.ToString());
+                }
+            }
+            finally
+            {
+                refreshButton.Enabled = true;
             }
         }
 
-        private void LoadDatabases()
+        private async Task LoadDatabasesAsync()
         {
             try
             {
                 databaseListBox.Items.Clear();
                 using (var command = new SqlCommand("SELECT name FROM sys.databases ORDER BY name", currentConnection))
                 {
-                    using (var reader = command.ExecuteReader())
+                    using (var reader = await command.ExecuteReaderAsync())
                     {
-                        while (reader.Read())
+                        while (await reader.ReadAsync())
                         {
                             databaseListBox.Items.Add(reader["name"].ToString());
                         }
@@ -325,6 +374,12 @@ namespace SqlServerManager
                 MessageBox.Show($"Error loading databases: {ex.Message}", "Error", 
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+        
+        private void LoadDatabases()
+        {
+            // Keep synchronous version for backward compatibility
+            _ = LoadDatabasesAsync();
         }
 
         private void DatabaseListBox_DoubleClick(object sender, EventArgs e)
@@ -350,7 +405,7 @@ namespace SqlServerManager
             }
         }
 
-        private void LoadTables(string databaseName)
+        private async Task LoadTablesAsync(string databaseName)
         {
             // Check if connection is valid before attempting to load
             if (currentConnection == null || currentConnection.State != ConnectionState.Open)
@@ -388,6 +443,12 @@ namespace SqlServerManager
                 MessageBox.Show($"Error loading tables: {ex.Message}", "Error", 
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+        
+        private void LoadTables(string databaseName)
+        {
+            // Keep synchronous version for backward compatibility
+            _ = LoadTablesAsync(databaseName);
         }
 
         private void TablesGridView_SelectionChanged(object sender, EventArgs e)
@@ -881,6 +942,19 @@ namespace SqlServerManager
                     MessageBox.Show($"Error deleting table: {ex.Message}", "Error", 
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
+            }
+        }
+        
+        private void LogToFile(string message)
+        {
+            try
+            {
+                string logFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "error.log");
+                File.AppendAllText(logFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] MainForm: {message}\n");
+            }
+            catch
+            {
+                // Ignore logging errors to prevent infinite loops
             }
         }
     }

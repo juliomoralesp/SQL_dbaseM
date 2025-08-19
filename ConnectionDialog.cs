@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Configuration;
-using System.Data.SqlClient;
+using Microsoft.Data.SqlClient;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -18,6 +18,7 @@ namespace SqlServerManager
         private Button okButton;
         private Button cancelButton;
         private CheckBox savePasswordCheckBox;
+        private CheckBox trustServerCertCheckBox;
         private ComboBox savedConnectionsComboBox;
         private Label serverLabel;
         private Label authLabel;
@@ -121,6 +122,13 @@ namespace SqlServerManager
             savePasswordCheckBox.Location = new Point(140, 195);
             savePasswordCheckBox.Size = new Size(120, 25);
             savePasswordCheckBox.Enabled = false;
+            
+            // Trust server certificate
+            trustServerCertCheckBox = new CheckBox();
+            trustServerCertCheckBox.Text = "Trust server certificate";
+            trustServerCertCheckBox.Location = new Point(270, 195);
+            trustServerCertCheckBox.Size = new Size(140, 25);
+            trustServerCertCheckBox.Checked = true; // Default to true for easier setup
 
             // Database (optional)
             databaseLabel = new Label();
@@ -160,7 +168,7 @@ namespace SqlServerManager
                 authLabel, authenticationComboBox,
                 usernameLabel, usernameTextBox,
                 passwordLabel, passwordTextBox,
-                savePasswordCheckBox,
+                savePasswordCheckBox, trustServerCertCheckBox,
                 databaseLabel, databaseTextBox,
                 testButton, okButton, cancelButton
             });
@@ -222,21 +230,27 @@ namespace SqlServerManager
                 builder.InitialCatalog = databaseTextBox.Text;
             }
             
-            builder.ConnectTimeout = 30;
+            builder.ConnectTimeout = 15; // Reduced timeout for better responsiveness
+            builder.TrustServerCertificate = trustServerCertCheckBox.Checked; // User-controlled certificate trust
             return builder.ToString();
         }
 
-        private void TestButton_Click(object sender, EventArgs e)
+        private async void TestButton_Click(object sender, EventArgs e)
         {
+            // Disable the button and show progress
+            testButton.Enabled = false;
+            testButton.Text = "Testing...";
+            
             try
             {
                 string testConnectionString = BuildConnectionString();
                 using (var connection = new SqlConnection(testConnectionString))
                 {
-                    connection.Open();
+                    // Use async open with timeout
+                    await connection.OpenAsync();
                     using (var command = new SqlCommand("SELECT 1", connection))
                     {
-                        command.ExecuteScalar();
+                        await command.ExecuteScalarAsync();
                     }
                 }
                 MessageBox.Show("Connection test successful!", "Success", 
@@ -247,17 +261,27 @@ namespace SqlServerManager
                 MessageBox.Show($"Connection test failed:\n{ex.Message}", "Connection Failed", 
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+            finally
+            {
+                // Re-enable the button
+                testButton.Enabled = true;
+                testButton.Text = "Test";
+            }
         }
 
-        private void OkButton_Click(object sender, EventArgs e)
+        private async void OkButton_Click(object sender, EventArgs e)
         {
+            // Disable OK button and show progress
+            okButton.Enabled = false;
+            okButton.Text = "Connecting...";
+            
             try
             {
                 ConnectionString = BuildConnectionString();
                 // Test the connection before accepting
                 using (var connection = new SqlConnection(ConnectionString))
                 {
-                    connection.Open();
+                    await connection.OpenAsync();
                 }
                 
                 // Save the connection with password if requested
@@ -266,12 +290,19 @@ namespace SqlServerManager
                     // Build connection string with password for saving
                     SaveConnectionWithPassword();
                 }
+                
+                // Connection successful, close dialog
+                this.DialogResult = DialogResult.OK;
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Cannot connect to server:\n{ex.Message}", "Connection Failed", 
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
                 this.DialogResult = DialogResult.None;
+                
+                // Re-enable OK button
+                okButton.Enabled = true;
+                okButton.Text = "OK";
             }
         }
         
