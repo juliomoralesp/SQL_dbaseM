@@ -130,11 +130,31 @@ namespace SqlServerManager
             var deleteDatabaseMenuItem = new ToolStripMenuItem("Delete Database", null, DeleteDatabase_Click);
             var propertiesMenuItem = new ToolStripMenuItem("Properties", null, DatabaseProperties_Click);
             
+            // Database maintenance actions
+            var backupDatabaseMenuItem = new ToolStripMenuItem("Backup Database", null, BackupDatabase_Click);
+            var restoreDatabaseMenuItem = new ToolStripMenuItem("Restore Database", null, RestoreDatabase_Click);
+            var shrinkDatabaseMenuItem = new ToolStripMenuItem("Shrink Database", null, ShrinkDatabase_Click);
+            var checkIntegrityMenuItem = new ToolStripMenuItem("Check Database Integrity", null, CheckDatabaseIntegrity_Click);
+            
+            // Database scripting actions
+            var scriptDatabaseMenuItem = new ToolStripMenuItem("Generate Scripts", null, ScriptDatabase_Click);
+            var exportDataMenuItem = new ToolStripMenuItem("Export Data", null, ExportDatabaseData_Click);
+            var importDataMenuItem = new ToolStripMenuItem("Import Data", null, ImportDatabaseData_Click);
+            
             databaseContextMenu.Items.AddRange(new ToolStripItem[] {
                 createDatabaseMenuItem,
                 new ToolStripSeparator(),
                 renameDatabaseMenuItem,
                 deleteDatabaseMenuItem,
+                new ToolStripSeparator(),
+                backupDatabaseMenuItem,
+                restoreDatabaseMenuItem,
+                shrinkDatabaseMenuItem,
+                checkIntegrityMenuItem,
+                new ToolStripSeparator(),
+                scriptDatabaseMenuItem,
+                exportDataMenuItem,
+                importDataMenuItem,
                 new ToolStripSeparator(),
                 propertiesMenuItem
             });
@@ -173,6 +193,27 @@ namespace SqlServerManager
             var createTableMenuItem = new ToolStripMenuItem("Create New Table", null, CreateTable_Click);
             var editTableMenuItem = new ToolStripMenuItem("Edit Table Structure", null, EditTable_Click);
             var deleteTableMenuItem = new ToolStripMenuItem("Delete Table", null, DeleteTable_Click);
+            
+            // Data operations
+            var viewDataMenuItem = new ToolStripMenuItem("View Data", null, ViewTableData_Click);
+            var editDataMenuItem = new ToolStripMenuItem("Edit Data", null, EditTableData_Click);
+            var insertDataMenuItem = new ToolStripMenuItem("Insert Data", null, InsertTableData_Click);
+            
+            // Table operations
+            var truncateTableMenuItem = new ToolStripMenuItem("Truncate Table", null, TruncateTable_Click);
+            var copyTableMenuItem = new ToolStripMenuItem("Duplicate Table", null, CopyTable_Click);
+            var renameTableMenuItem = new ToolStripMenuItem("Rename Table", null, RenameTable_Click);
+            
+            // Table analysis
+            var viewIndexesMenuItem = new ToolStripMenuItem("View Indexes", null, ViewTableIndexes_Click);
+            var viewConstraintsMenuItem = new ToolStripMenuItem("View Constraints", null, ViewTableConstraints_Click);
+            var tableStatsMenuItem = new ToolStripMenuItem("Table Statistics", null, ViewTableStats_Click);
+            
+            // Import/Export operations
+            var exportTableMenuItem = new ToolStripMenuItem("Export Table Data", null, ExportTableData_Click);
+            var importTableMenuItem = new ToolStripMenuItem("Import Table Data", null, ImportTableData_Click);
+            var scriptTableMenuItem = new ToolStripMenuItem("Generate Table Script", null, ScriptTable_Click);
+            
             var refreshTablesMenuItem = new ToolStripMenuItem("Refresh Tables", null, (s, e) => { 
                 if (!string.IsNullOrEmpty(currentDatabaseName)) LoadTables(currentDatabaseName); 
             });
@@ -181,6 +222,22 @@ namespace SqlServerManager
                 createTableMenuItem,
                 editTableMenuItem,
                 deleteTableMenuItem,
+                new ToolStripSeparator(),
+                viewDataMenuItem,
+                editDataMenuItem,
+                insertDataMenuItem,
+                new ToolStripSeparator(),
+                truncateTableMenuItem,
+                copyTableMenuItem,
+                renameTableMenuItem,
+                new ToolStripSeparator(),
+                viewIndexesMenuItem,
+                viewConstraintsMenuItem,
+                tableStatsMenuItem,
+                new ToolStripSeparator(),
+                exportTableMenuItem,
+                importTableMenuItem,
+                scriptTableMenuItem,
                 new ToolStripSeparator(),
                 refreshTablesMenuItem
             });
@@ -956,6 +1013,659 @@ namespace SqlServerManager
             {
                 // Ignore logging errors to prevent infinite loops
             }
+        }
+
+        // Database action methods
+        private void BackupDatabase_Click(object sender, EventArgs e)
+        {
+            if (databaseListBox.SelectedItem == null)
+            {
+                MessageBox.Show("Please select a database to backup.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            string dbName = databaseListBox.SelectedItem.ToString();
+            using (var saveDialog = new SaveFileDialog())
+            {
+                saveDialog.Filter = "Backup files (*.bak)|*.bak|All files (*.*)|*.*";
+                saveDialog.Title = "Save Database Backup";
+                saveDialog.FileName = $"{dbName}_backup_{DateTime.Now:yyyyMMdd_HHmmss}.bak";
+                
+                if (saveDialog.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        string query = $"BACKUP DATABASE [{dbName}] TO DISK = @backupPath";
+                        using (var command = new SqlCommand(query, currentConnection))
+                        {
+                            command.Parameters.AddWithValue("@backupPath", saveDialog.FileName);
+                            command.CommandTimeout = 300; // 5 minutes timeout for backup
+                            statusLabel.Text = "Creating backup...";
+                            command.ExecuteNonQuery();
+                        }
+                        MessageBox.Show($"Database '{dbName}' backed up successfully to:\n{saveDialog.FileName}", 
+                            "Backup Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        statusLabel.Text = "Backup completed";
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Error backing up database: {ex.Message}", "Backup Error", 
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        statusLabel.Text = "Backup failed";
+                    }
+                }
+            }
+        }
+
+        private void RestoreDatabase_Click(object sender, EventArgs e)
+        {
+            using (var openDialog = new OpenFileDialog())
+            {
+                openDialog.Filter = "Backup files (*.bak)|*.bak|All files (*.*)|*.*";
+                openDialog.Title = "Select Database Backup File";
+                
+                if (openDialog.ShowDialog() == DialogResult.OK)
+                {
+                    using (var dialog = new InputDialog("Restore Database", "Database name:", ""))
+                    {
+                        if (dialog.ShowDialog() == DialogResult.OK)
+                        {
+                            try
+                            {
+                                string dbName = dialog.InputValue;
+                                string query = $"RESTORE DATABASE [{dbName}] FROM DISK = @backupPath WITH REPLACE";
+                                using (var command = new SqlCommand(query, currentConnection))
+                                {
+                                    command.Parameters.AddWithValue("@backupPath", openDialog.FileName);
+                                    command.CommandTimeout = 300; // 5 minutes timeout for restore
+                                    statusLabel.Text = "Restoring database...";
+                                    command.ExecuteNonQuery();
+                                }
+                                MessageBox.Show($"Database '{dbName}' restored successfully.", 
+                                    "Restore Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                LoadDatabases();
+                                statusLabel.Text = "Restore completed";
+                            }
+                            catch (Exception ex)
+                            {
+                                MessageBox.Show($"Error restoring database: {ex.Message}", "Restore Error", 
+                                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                statusLabel.Text = "Restore failed";
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private void ShrinkDatabase_Click(object sender, EventArgs e)
+        {
+            if (databaseListBox.SelectedItem == null)
+            {
+                MessageBox.Show("Please select a database to shrink.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            string dbName = databaseListBox.SelectedItem.ToString();
+            var result = MessageBox.Show($"Are you sure you want to shrink the database '{dbName}'?\n\n" +
+                "This operation may take a long time and should be done during low activity periods.", 
+                "Confirm Shrink", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            
+            if (result == DialogResult.Yes)
+            {
+                try
+                {
+                    string query = $"DBCC SHRINKDATABASE([{dbName}])";
+                    using (var command = new SqlCommand(query, currentConnection))
+                    {
+                        command.CommandTimeout = 300; // 5 minutes timeout
+                        statusLabel.Text = "Shrinking database...";
+                        command.ExecuteNonQuery();
+                    }
+                    MessageBox.Show($"Database '{dbName}' shrunk successfully.", "Shrink Complete", 
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    statusLabel.Text = "Shrink completed";
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error shrinking database: {ex.Message}", "Shrink Error", 
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    statusLabel.Text = "Shrink failed";
+                }
+            }
+        }
+
+        private void CheckDatabaseIntegrity_Click(object sender, EventArgs e)
+        {
+            if (databaseListBox.SelectedItem == null)
+            {
+                MessageBox.Show("Please select a database to check.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            string dbName = databaseListBox.SelectedItem.ToString();
+            try
+            {
+                string query = $"DBCC CHECKDB([{dbName}]) WITH NO_INFOMSGS";
+                using (var command = new SqlCommand(query, currentConnection))
+                {
+                    command.CommandTimeout = 300; // 5 minutes timeout
+                    statusLabel.Text = "Checking database integrity...";
+                    command.ExecuteNonQuery();
+                }
+                MessageBox.Show($"Database integrity check completed for '{dbName}'.", "Check Complete", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                statusLabel.Text = "Integrity check completed";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error checking database integrity: {ex.Message}", "Check Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                statusLabel.Text = "Integrity check failed";
+            }
+        }
+
+        private void ScriptDatabase_Click(object sender, EventArgs e)
+        {
+            if (databaseListBox.SelectedItem == null)
+            {
+                MessageBox.Show("Please select a database to script.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            MessageBox.Show("Database scripting functionality would be implemented here.\n\n" +
+                "This feature typically requires SQL Server Management Objects (SMO) libraries.", 
+                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void ExportDatabaseData_Click(object sender, EventArgs e)
+        {
+            if (databaseListBox.SelectedItem == null)
+            {
+                MessageBox.Show("Please select a database to export.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            MessageBox.Show("Database data export functionality would be implemented here.\n\n" +
+                "This could export to CSV, XML, or SQL INSERT statements.", 
+                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void ImportDatabaseData_Click(object sender, EventArgs e)
+        {
+            if (databaseListBox.SelectedItem == null)
+            {
+                MessageBox.Show("Please select a database to import data into.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            MessageBox.Show("Database data import functionality would be implemented here.\n\n" +
+                "This could import from CSV, XML, or SQL scripts.", 
+                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        // Table action methods
+        private void ViewTableData_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to view.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            try
+            {
+                var query = $"USE [{currentDatabaseName}]; SELECT TOP 1000 * FROM [{schema}].[{tableName}]";
+                using (var command = new SqlCommand(query, currentConnection))
+                {
+                    var adapter = new SqlDataAdapter(command);
+                    var dataTable = new DataTable();
+                    adapter.Fill(dataTable);
+                    
+                    // Create a simple data viewer form
+                    var dataForm = new Form()
+                    {
+                        Text = $"Data: {schema}.{tableName} (Top 1000 rows)",
+                        Size = new Size(800, 600),
+                        StartPosition = FormStartPosition.CenterParent
+                    };
+                    
+                    var dataGrid = new DataGridView()
+                    {
+                        Dock = DockStyle.Fill,
+                        DataSource = dataTable,
+                        ReadOnly = true,
+                        AllowUserToAddRows = false,
+                        AllowUserToDeleteRows = false
+                    };
+                    
+                    dataForm.Controls.Add(dataGrid);
+                    ThemeManager.ApplyThemeToDialog(dataForm);
+                    dataForm.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error viewing table data: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void EditTableData_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to edit.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            try
+            {
+                using (var dataEditor = new TableDataEditor(currentConnection, currentDatabaseName, schema, tableName))
+                {
+                    ThemeManager.ApplyThemeToDialog(dataEditor);
+                    FontManager.ApplyFontSize(dataEditor, currentFontScale);
+                    dataEditor.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening data editor: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void InsertTableData_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to insert data into.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            try
+            {
+                using (var dataEditor = new TableDataEditor(currentConnection, currentDatabaseName, schema, tableName))
+                {
+                    ThemeManager.ApplyThemeToDialog(dataEditor);
+                    FontManager.ApplyFontSize(dataEditor, currentFontScale);
+                    
+                    // The data editor will open ready for editing - user can add new rows using the Add Row button
+                    dataEditor.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening data editor: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void TruncateTable_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to truncate.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            var result = MessageBox.Show(
+                $"Are you sure you want to truncate the table '{schema}.{tableName}'?\n\n" +
+                "This will delete all data in the table and cannot be undone!", 
+                "Confirm Truncate", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            
+            if (result == DialogResult.Yes)
+            {
+                try
+                {
+                    string query = $"USE [{currentDatabaseName}]; TRUNCATE TABLE [{schema}].[{tableName}]";
+                    using (var command = new SqlCommand(query, currentConnection))
+                    {
+                        command.ExecuteNonQuery();
+                    }
+                    MessageBox.Show($"Table '{schema}.{tableName}' truncated successfully.", "Success", 
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error truncating table: {ex.Message}", "Error", 
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void CopyTable_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to copy.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            using (var dialog = new InputDialog($"Copy table '{schema}.{tableName}'", "New table name:", $"{tableName}_Copy"))
+            {
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        string newTableName = dialog.InputValue;
+                        string query = $"USE [{currentDatabaseName}]; SELECT * INTO [{schema}].[{newTableName}] FROM [{schema}].[{tableName}]";
+                        using (var command = new SqlCommand(query, currentConnection))
+                        {
+                            command.ExecuteNonQuery();
+                        }
+                        MessageBox.Show($"Table copied successfully to '{schema}.{newTableName}'.", "Success", 
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        LoadTables(currentDatabaseName);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Error copying table: {ex.Message}", "Error", 
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+
+        private void RenameTable_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to rename.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            using (var dialog = new InputDialog($"Rename table '{schema}.{tableName}'", "New table name:", tableName))
+            {
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        string newTableName = dialog.InputValue;
+                        string query = $"USE [{currentDatabaseName}]; EXEC sp_rename '[{schema}].[{tableName}]', '{newTableName}'";
+                        using (var command = new SqlCommand(query, currentConnection))
+                        {
+                            command.ExecuteNonQuery();
+                        }
+                        MessageBox.Show($"Table renamed successfully to '{schema}.{newTableName}'.", "Success", 
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        LoadTables(currentDatabaseName);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Error renaming table: {ex.Message}", "Error", 
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+
+        private void ViewTableIndexes_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to view indexes.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            try
+            {
+                var query = $@"
+                    USE [{currentDatabaseName}];
+                    SELECT 
+                        i.name as [Index Name],
+                        i.type_desc as [Index Type],
+                        i.is_unique as [Is Unique],
+                        i.is_primary_key as [Is Primary Key],
+                        STRING_AGG(c.name, ', ') as [Columns]
+                    FROM sys.indexes i
+                    INNER JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+                    INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+                    INNER JOIN sys.tables t ON i.object_id = t.object_id
+                    INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+                    WHERE s.name = @schema AND t.name = @table
+                    GROUP BY i.name, i.type_desc, i.is_unique, i.is_primary_key
+                    ORDER BY i.name";
+                
+                using (var command = new SqlCommand(query, currentConnection))
+                {
+                    command.Parameters.AddWithValue("@schema", schema);
+                    command.Parameters.AddWithValue("@table", tableName);
+                    
+                    var adapter = new SqlDataAdapter(command);
+                    var dataTable = new DataTable();
+                    adapter.Fill(dataTable);
+                    
+                    var indexForm = new Form()
+                    {
+                        Text = $"Indexes: {schema}.{tableName}",
+                        Size = new Size(700, 400),
+                        StartPosition = FormStartPosition.CenterParent
+                    };
+                    
+                    var indexGrid = new DataGridView()
+                    {
+                        Dock = DockStyle.Fill,
+                        DataSource = dataTable,
+                        ReadOnly = true,
+                        AllowUserToAddRows = false,
+                        AllowUserToDeleteRows = false
+                    };
+                    
+                    indexForm.Controls.Add(indexGrid);
+                    ThemeManager.ApplyThemeToDialog(indexForm);
+                    indexForm.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error viewing table indexes: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ViewTableConstraints_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to view constraints.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            try
+            {
+                var query = $@"
+                    USE [{currentDatabaseName}];
+                    SELECT 
+                        tc.CONSTRAINT_NAME as [Constraint Name],
+                        tc.CONSTRAINT_TYPE as [Constraint Type],
+                        STRING_AGG(cc.COLUMN_NAME, ', ') as [Columns]
+                    FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                    LEFT JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE cc 
+                        ON tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
+                    WHERE tc.TABLE_SCHEMA = @schema AND tc.TABLE_NAME = @table
+                    GROUP BY tc.CONSTRAINT_NAME, tc.CONSTRAINT_TYPE
+                    ORDER BY tc.CONSTRAINT_TYPE, tc.CONSTRAINT_NAME";
+                
+                using (var command = new SqlCommand(query, currentConnection))
+                {
+                    command.Parameters.AddWithValue("@schema", schema);
+                    command.Parameters.AddWithValue("@table", tableName);
+                    
+                    var adapter = new SqlDataAdapter(command);
+                    var dataTable = new DataTable();
+                    adapter.Fill(dataTable);
+                    
+                    var constraintForm = new Form()
+                    {
+                        Text = $"Constraints: {schema}.{tableName}",
+                        Size = new Size(600, 400),
+                        StartPosition = FormStartPosition.CenterParent
+                    };
+                    
+                    var constraintGrid = new DataGridView()
+                    {
+                        Dock = DockStyle.Fill,
+                        DataSource = dataTable,
+                        ReadOnly = true,
+                        AllowUserToAddRows = false,
+                        AllowUserToDeleteRows = false
+                    };
+                    
+                    constraintForm.Controls.Add(constraintGrid);
+                    ThemeManager.ApplyThemeToDialog(constraintForm);
+                    constraintForm.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error viewing table constraints: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ViewTableStats_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to view statistics.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            try
+            {
+                var query = $@"
+                    USE [{currentDatabaseName}];
+                    SELECT 
+                        'Row Count' as [Statistic],
+                        COUNT(*) as [Value]
+                    FROM [{schema}].[{tableName}]
+                    UNION ALL
+                    SELECT 
+                        'Column Count' as [Statistic],
+                        COUNT(*) as [Value]
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @table";
+                
+                using (var command = new SqlCommand(query, currentConnection))
+                {
+                    command.Parameters.AddWithValue("@schema", schema);
+                    command.Parameters.AddWithValue("@table", tableName);
+                    
+                    var adapter = new SqlDataAdapter(command);
+                    var dataTable = new DataTable();
+                    adapter.Fill(dataTable);
+                    
+                    var statsForm = new Form()
+                    {
+                        Text = $"Statistics: {schema}.{tableName}",
+                        Size = new Size(400, 300),
+                        StartPosition = FormStartPosition.CenterParent
+                    };
+                    
+                    var statsGrid = new DataGridView()
+                    {
+                        Dock = DockStyle.Fill,
+                        DataSource = dataTable,
+                        ReadOnly = true,
+                        AllowUserToAddRows = false,
+                        AllowUserToDeleteRows = false
+                    };
+                    
+                    statsForm.Controls.Add(statsGrid);
+                    ThemeManager.ApplyThemeToDialog(statsForm);
+                    statsForm.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error viewing table statistics: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void ExportTableData_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to export.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            MessageBox.Show("Table data export functionality would be implemented here.\n\n" +
+                "This could export table data to CSV, Excel, or other formats.", 
+                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void ImportTableData_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to import data into.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            MessageBox.Show("Table data import functionality would be implemented here.\n\n" +
+                "This could import data from CSV, Excel, or other formats.", 
+                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void ScriptTable_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null || tablesGridView.CurrentRow.Cells["Table Name"] == null)
+            {
+                MessageBox.Show("Please select a table to script.", "No Selection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            MessageBox.Show("Table scripting functionality would be implemented here.\n\n" +
+                "This would generate CREATE TABLE scripts and optionally INSERT statements.", 
+                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 }

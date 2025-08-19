@@ -4,6 +4,8 @@ using System.Configuration;
 using Microsoft.Data.SqlClient;
 using System.Drawing;
 using System.Windows.Forms;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SqlServerManager
 {
@@ -26,6 +28,12 @@ namespace SqlServerManager
         private Label passwordLabel;
         private Label databaseLabel;
         private Label savedConnectionsLabel;
+        private Label timeoutLabel;
+        private NumericUpDown timeoutNumeric;
+        private ProgressBar connectionProgressBar;
+        private Label statusLabel;
+        private Button cancelConnectionButton;
+        private CancellationTokenSource cancellationTokenSource;
         
         public string ConnectionString { get; private set; }
 
@@ -48,7 +56,7 @@ namespace SqlServerManager
         private void InitializeComponent()
         {
             this.Text = "Connect to SQL Server";
-            this.Size = new Size(450, 380);
+            this.Size = new Size(450, 450);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
@@ -141,23 +149,59 @@ namespace SqlServerManager
             databaseTextBox.Size = new Size(270, 25);
             databaseTextBox.Text = "master";
 
+            // Connection Timeout
+            timeoutLabel = new Label();
+            timeoutLabel.Text = "Connection Timeout (sec):";
+            timeoutLabel.Location = new Point(20, 260);
+            timeoutLabel.Size = new Size(130, 20);
+
+            timeoutNumeric = new NumericUpDown();
+            timeoutNumeric.Location = new Point(150, 258);
+            timeoutNumeric.Size = new Size(80, 25);
+            timeoutNumeric.Minimum = 5;
+            timeoutNumeric.Maximum = 300;
+            timeoutNumeric.Value = 15;
+            timeoutNumeric.DecimalPlaces = 0;
+
+            // Progress Bar and Status
+            connectionProgressBar = new ProgressBar();
+            connectionProgressBar.Location = new Point(20, 290);
+            connectionProgressBar.Size = new Size(390, 20);
+            connectionProgressBar.Style = ProgressBarStyle.Marquee;
+            connectionProgressBar.MarqueeAnimationSpeed = 50;
+            connectionProgressBar.Visible = false;
+
+            statusLabel = new Label();
+            statusLabel.Location = new Point(20, 315);
+            statusLabel.Size = new Size(390, 20);
+            statusLabel.Text = "Ready to connect";
+            statusLabel.ForeColor = Color.Gray;
+
+            // Cancel Connection Button (initially hidden)
+            cancelConnectionButton = new Button();
+            cancelConnectionButton.Text = "Cancel";
+            cancelConnectionButton.Location = new Point(250, 258);
+            cancelConnectionButton.Size = new Size(80, 25);
+            cancelConnectionButton.Visible = false;
+            cancelConnectionButton.Click += CancelConnectionButton_Click;
+
             // Buttons
             testButton = new Button();
             testButton.Text = "Test Connection";
-            testButton.Location = new Point(20, 280);
+            testButton.Location = new Point(20, 350);
             testButton.Size = new Size(120, 30);
             testButton.Click += TestButton_Click;
 
             okButton = new Button();
             okButton.Text = "OK";
-            okButton.Location = new Point(240, 280);
+            okButton.Location = new Point(240, 350);
             okButton.Size = new Size(80, 30);
             okButton.DialogResult = DialogResult.OK;
             okButton.Click += OkButton_Click;
 
             cancelButton = new Button();
             cancelButton.Text = "Cancel";
-            cancelButton.Location = new Point(330, 280);
+            cancelButton.Location = new Point(330, 350);
             cancelButton.Size = new Size(80, 30);
             cancelButton.DialogResult = DialogResult.Cancel;
 
@@ -170,6 +214,8 @@ namespace SqlServerManager
                 passwordLabel, passwordTextBox,
                 savePasswordCheckBox, trustServerCertCheckBox,
                 databaseLabel, databaseTextBox,
+                timeoutLabel, timeoutNumeric, cancelConnectionButton,
+                connectionProgressBar, statusLabel,
                 testButton, okButton, cancelButton
             });
 
@@ -230,79 +276,155 @@ namespace SqlServerManager
                 builder.InitialCatalog = databaseTextBox.Text;
             }
             
-            builder.ConnectTimeout = 15; // Reduced timeout for better responsiveness
+            builder.ConnectTimeout = (int)timeoutNumeric.Value; // Use user-specified timeout
             builder.TrustServerCertificate = trustServerCertCheckBox.Checked; // User-controlled certificate trust
+            builder.MultipleActiveResultSets = true; // Enable MARS for TableDataEditor
             return builder.ToString();
         }
 
         private async void TestButton_Click(object sender, EventArgs e)
         {
-            // Disable the button and show progress
-            testButton.Enabled = false;
-            testButton.Text = "Testing...";
-            
-            try
-            {
-                string testConnectionString = BuildConnectionString();
-                using (var connection = new SqlConnection(testConnectionString))
-                {
-                    // Use async open with timeout
-                    await connection.OpenAsync();
-                    using (var command = new SqlCommand("SELECT 1", connection))
-                    {
-                        await command.ExecuteScalarAsync();
-                    }
-                }
-                MessageBox.Show("Connection test successful!", "Success", 
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Connection test failed:\n{ex.Message}", "Connection Failed", 
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                // Re-enable the button
-                testButton.Enabled = true;
-                testButton.Text = "Test";
-            }
+            await TestConnectionAsync(isTestOnly: true);
         }
 
         private async void OkButton_Click(object sender, EventArgs e)
         {
-            // Disable OK button and show progress
-            okButton.Enabled = false;
-            okButton.Text = "Connecting...";
-            
-            try
+            bool success = await TestConnectionAsync(isTestOnly: false);
+            if (success)
             {
-                ConnectionString = BuildConnectionString();
-                // Test the connection before accepting
-                using (var connection = new SqlConnection(ConnectionString))
-                {
-                    await connection.OpenAsync();
-                }
-                
                 // Save the connection with password if requested
                 if (authenticationComboBox.SelectedIndex == 1 && savePasswordCheckBox.Checked)
                 {
-                    // Build connection string with password for saving
                     SaveConnectionWithPassword();
                 }
                 
                 // Connection successful, close dialog
                 this.DialogResult = DialogResult.OK;
             }
+        }
+
+        private async Task<bool> TestConnectionAsync(bool isTestOnly)
+        {
+            // Create cancellation token source
+            cancellationTokenSource = new CancellationTokenSource();
+            
+            // Show progress UI
+            ShowConnectionProgress(isTestOnly);
+            
+            try
+            {
+                var connectionString = BuildConnectionString();
+                if (!isTestOnly)
+                {
+                    ConnectionString = connectionString;
+                }
+                
+                statusLabel.Text = "Connecting to server...";
+                statusLabel.ForeColor = Color.Blue;
+                
+                using (var connection = new SqlConnection(connectionString))
+                {
+                    // Use async open with cancellation token
+                    await connection.OpenAsync(cancellationTokenSource.Token);
+                    
+                    statusLabel.Text = "Testing connection...";
+                    
+                    using (var command = new SqlCommand("SELECT @@VERSION", connection))
+                    {
+                        command.CommandTimeout = (int)timeoutNumeric.Value;
+                        await command.ExecuteScalarAsync(cancellationTokenSource.Token);
+                    }
+                }
+                
+                // Success
+                statusLabel.Text = "Connection successful!";
+                statusLabel.ForeColor = Color.Green;
+                
+                if (isTestOnly)
+                {
+                    MessageBox.Show("Connection test successful!", "Success", 
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                statusLabel.Text = "Connection cancelled";
+                statusLabel.ForeColor = Color.Orange;
+                return false;
+            }
             catch (Exception ex)
             {
-                MessageBox.Show($"Cannot connect to server:\n{ex.Message}", "Connection Failed", 
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-                this.DialogResult = DialogResult.None;
+                statusLabel.Text = $"Connection failed: {ex.Message}";
+                statusLabel.ForeColor = Color.Red;
                 
-                // Re-enable OK button
-                okButton.Enabled = true;
-                okButton.Text = "OK";
+                if (isTestOnly)
+                {
+                    MessageBox.Show($"Connection test failed:\n{ex.Message}", "Connection Failed", 
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                else
+                {
+                    MessageBox.Show($"Cannot connect to server:\n{ex.Message}", "Connection Failed", 
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                
+                return false;
+            }
+            finally
+            {
+                HideConnectionProgress(isTestOnly);
+                cancellationTokenSource?.Dispose();
+                cancellationTokenSource = null;
+            }
+        }
+        
+        private void ShowConnectionProgress(bool isTestOnly)
+        {
+            // Disable controls
+            testButton.Enabled = false;
+            okButton.Enabled = false;
+            timeoutNumeric.Enabled = false;
+            
+            // Update button text
+            if (isTestOnly)
+            {
+                testButton.Text = "Testing...";
+            }
+            else
+            {
+                okButton.Text = "Connecting...";
+            }
+            
+            // Show progress
+            connectionProgressBar.Visible = true;
+            cancelConnectionButton.Visible = true;
+        }
+        
+        private void HideConnectionProgress(bool isTestOnly)
+        {
+            // Re-enable controls
+            testButton.Enabled = true;
+            okButton.Enabled = true;
+            timeoutNumeric.Enabled = true;
+            
+            // Reset button text
+            testButton.Text = "Test Connection";
+            okButton.Text = "OK";
+            
+            // Hide progress
+            connectionProgressBar.Visible = false;
+            cancelConnectionButton.Visible = false;
+        }
+        
+        private void CancelConnectionButton_Click(object sender, EventArgs e)
+        {
+            if (cancellationTokenSource != null && !cancellationTokenSource.Token.IsCancellationRequested)
+            {
+                cancellationTokenSource.Cancel();
+                statusLabel.Text = "Cancelling connection...";
+                statusLabel.ForeColor = Color.Orange;
             }
         }
         
