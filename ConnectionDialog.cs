@@ -36,20 +36,28 @@ namespace SqlServerManager
         private CancellationTokenSource cancellationTokenSource;
         
         public string ConnectionString { get; private set; }
+        
+        public string ServerName
+        {
+            get => serverTextBox.Text;
+            set => serverTextBox.Text = value;
+        }
 
         public ConnectionDialog()
         {
             InitializeComponent();
             LoadSavedConnections();
             
-            // Apply fonts
+            // Apply theme and fonts
             try
             {
-                this.Font = FontManager.GetScaledFont(9);
+                ThemeManager.ApplyThemeToDialog(this);
+                FontManager.ApplyFontSize(this, FontManager.CurrentFontSize / 10f);
             }
             catch
             {
-                // Use default font if FontManager not available
+                // Use default styling if theme/font managers not available
+                this.Font = new Font("Segoe UI", 9F);
             }
         }
 

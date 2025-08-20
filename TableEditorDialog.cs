@@ -485,12 +485,248 @@ namespace SqlServerManager
         
         private void ExecuteTableModification()
         {
-            // For simplicity, we'll show a message that table modification 
-            // requires more complex logic for production use
-            MessageBox.Show("Table modification saved. Note: This demo version shows the structure " +
-                "but doesn't execute ALTER TABLE commands. In production, you would need to compare " +
-                "the existing structure with the new one and generate appropriate ALTER TABLE statements.", 
-                "Information", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            try
+            {
+                // Get current table structure from database
+                var currentColumns = GetCurrentTableStructure();
+                var newColumns = Columns.ToList();
+                
+                // Generate ALTER TABLE statements
+                var alterStatements = GenerateAlterTableStatements(currentColumns, newColumns);
+                
+                if (alterStatements.Count == 0)
+                {
+                    MessageBox.Show("No changes detected in table structure.", "Information", 
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                
+                // Show confirmation dialog with changes
+                var confirmationDialog = new TableModificationConfirmationDialog(alterStatements);
+                if (confirmationDialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+                
+                // Execute ALTER TABLE statements in a transaction
+                using (var transaction = connection.BeginTransaction())
+                {
+                    try
+                    {
+                        foreach (var statement in alterStatements)
+                        {
+                            using (var command = new SqlCommand(statement, connection, transaction))
+                            {
+                                command.ExecuteNonQuery();
+                            }
+                        }
+                        
+                        transaction.Commit();
+                        
+                        MessageBox.Show($"Table '{tableName}' modified successfully.\n\n" +
+                            $"Executed {alterStatements.Count} ALTER TABLE statement(s).", 
+                            "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        transaction.Rollback();
+                        throw new Exception($"Failed to modify table: {ex.Message}", ex);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error modifying table: {ex.Message}", "Database Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                DialogResult = DialogResult.None;
+            }
+        }
+        
+        private List<ColumnDefinition> GetCurrentTableStructure()
+        {
+            var columns = new List<ColumnDefinition>();
+            
+            string sql = @"
+                SELECT 
+                    c.COLUMN_NAME,
+                    c.DATA_TYPE,
+                    c.CHARACTER_MAXIMUM_LENGTH,
+                    c.NUMERIC_PRECISION,
+                    c.NUMERIC_SCALE,
+                    c.IS_NULLABLE,
+                    c.COLUMN_DEFAULT,
+                    COLUMNPROPERTY(OBJECT_ID(c.TABLE_SCHEMA + '.' + c.TABLE_NAME), c.COLUMN_NAME, 'IsIdentity') as IsIdentity,
+                    CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 1 ELSE 0 END as IsPrimaryKey,
+                    c.ORDINAL_POSITION
+                FROM INFORMATION_SCHEMA.COLUMNS c
+                LEFT JOIN (
+                    SELECT ku.TABLE_NAME, ku.COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                    INNER JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku
+                        ON tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
+                    WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                        AND ku.TABLE_NAME = @tableName
+                ) pk ON c.COLUMN_NAME = pk.COLUMN_NAME
+                WHERE c.TABLE_NAME = @tableName
+                    AND c.TABLE_SCHEMA = 'dbo'
+                ORDER BY c.ORDINAL_POSITION";
+                
+            using (var command = new SqlCommand(sql, connection))
+            {
+                command.Parameters.AddWithValue("@tableName", tableName);
+                
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        var column = new ColumnDefinition
+                        {
+                            Name = reader["COLUMN_NAME"].ToString(),
+                            DataType = reader["DATA_TYPE"].ToString(),
+                            IsNullable = reader["IS_NULLABLE"].ToString() == "YES",
+                            DefaultValue = reader["COLUMN_DEFAULT"]?.ToString(),
+                            IsIdentity = Convert.ToBoolean(reader["IsIdentity"]),
+                            IsPrimaryKey = Convert.ToBoolean(reader["IsPrimaryKey"])
+                        };
+                        
+                        // Handle length/precision
+                        if (reader["CHARACTER_MAXIMUM_LENGTH"] != DBNull.Value)
+                        {
+                            column.Length = reader["CHARACTER_MAXIMUM_LENGTH"].ToString();
+                        }
+                        else if (reader["NUMERIC_PRECISION"] != DBNull.Value)
+                        {
+                            var precision = reader["NUMERIC_PRECISION"].ToString();
+                            var scale = reader["NUMERIC_SCALE"].ToString();
+                            if (scale != "0")
+                            {
+                                column.Length = $"{precision},{scale}";
+                            }
+                            else
+                            {
+                                column.Length = precision;
+                            }
+                        }
+                        
+                        columns.Add(column);
+                    }
+                }
+            }
+            
+            return columns;
+        }
+        
+        private List<string> GenerateAlterTableStatements(List<ColumnDefinition> currentColumns, List<ColumnDefinition> newColumns)
+        {
+            var statements = new List<string>();
+            var tableName = this.tableName;
+            
+            // Find columns to drop
+            foreach (var currentColumn in currentColumns)
+            {
+                if (!newColumns.Any(nc => nc.Name.Equals(currentColumn.Name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    statements.Add($"ALTER TABLE [dbo].[{tableName}] DROP COLUMN [{currentColumn.Name}];");
+                }
+            }
+            
+            // Find columns to add or modify
+            foreach (var newColumn in newColumns)
+            {
+                var currentColumn = currentColumns.FirstOrDefault(cc => 
+                    cc.Name.Equals(newColumn.Name, StringComparison.OrdinalIgnoreCase));
+                    
+                if (currentColumn == null)
+                {
+                    // Add new column
+                    var columnDef = BuildColumnDefinition(newColumn);
+                    statements.Add($"ALTER TABLE [dbo].[{tableName}] ADD [{newColumn.Name}] {columnDef};");
+                }
+                else
+                {
+                    // Check if column needs modification
+                    if (NeedsColumnModification(currentColumn, newColumn))
+                    {
+                        // For complex modifications, we might need to drop and recreate
+                        // For simple modifications, use ALTER COLUMN
+                        if (CanUseAlterColumn(currentColumn, newColumn))
+                        {
+                            var columnDef = BuildColumnDefinition(newColumn, forAlter: true);
+                            statements.Add($"ALTER TABLE [dbo].[{tableName}] ALTER COLUMN [{newColumn.Name}] {columnDef};");
+                        }
+                        else
+                        {
+                            // Complex modification - requires drop and add
+                            statements.Add($"-- Warning: Complex modification for column [{newColumn.Name}] may require manual intervention");
+                            statements.Add($"-- Current: {BuildColumnDefinition(currentColumn)}");
+                            statements.Add($"-- Desired: {BuildColumnDefinition(newColumn)}");
+                        }
+                    }
+                }
+            }
+            
+            return statements;
+        }
+        
+        private string BuildColumnDefinition(ColumnDefinition column, bool forAlter = false)
+        {
+            var def = new StringBuilder();
+            def.Append(column.DataType.ToUpper());
+            
+            // Add length/precision
+            if (!string.IsNullOrEmpty(column.Length) && NeedsLength(column.DataType))
+            {
+                def.Append($"({column.Length})");
+            }
+            
+            // Add identity (only for new columns, not ALTER COLUMN)
+            if (column.IsIdentity && !forAlter)
+            {
+                def.Append(" IDENTITY(1,1)");
+            }
+            
+            // Add nullable
+            def.Append(column.IsNullable ? " NULL" : " NOT NULL");
+            
+            // Add default value (only for new columns)
+            if (!string.IsNullOrEmpty(column.DefaultValue) && !forAlter)
+            {
+                def.Append($" DEFAULT {column.DefaultValue}");
+            }
+            
+            return def.ToString();
+        }
+        
+        private bool NeedsColumnModification(ColumnDefinition current, ColumnDefinition newCol)
+        {
+            return !current.DataType.Equals(newCol.DataType, StringComparison.OrdinalIgnoreCase) ||
+                   !string.Equals(current.Length ?? "", newCol.Length ?? "") ||
+                   current.IsNullable != newCol.IsNullable ||
+                   !string.Equals(current.DefaultValue ?? "", newCol.DefaultValue ?? "");
+        }
+        
+        private bool CanUseAlterColumn(ColumnDefinition current, ColumnDefinition newCol)
+        {
+            // Can't use ALTER COLUMN if changing identity, primary key, or certain data type conversions
+            if (current.IsIdentity != newCol.IsIdentity || current.IsPrimaryKey != newCol.IsPrimaryKey)
+            {
+                return false;
+            }
+            
+            // Check for incompatible data type changes
+            var incompatibleChanges = new[]
+            {
+                ("int", "varchar"), ("varchar", "int"),
+                ("datetime", "int"), ("int", "datetime")
+                // Add more incompatible combinations as needed
+            };
+            
+            var currentType = current.DataType.ToLower();
+            var newType = newCol.DataType.ToLower();
+            
+            return !incompatibleChanges.Any(ic => 
+                (ic.Item1 == currentType && ic.Item2 == newType) ||
+                (ic.Item2 == currentType && ic.Item1 == newType));
         }
         
         private bool NeedsLength(string dataType)

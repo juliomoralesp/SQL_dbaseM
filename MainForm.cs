@@ -8,6 +8,7 @@ using System.Windows.Forms;
 using System.Configuration;
 using System.IO;
 using System.Threading.Tasks;
+using SqlServerManager.UI;
 
 namespace SqlServerManager
 {
@@ -37,6 +38,7 @@ namespace SqlServerManager
         private Label columnsLabel;
         private string currentDatabaseName;
         private float currentFontScale = 1.2f; // Start with 20% larger fonts
+        private SqlEditorControl sqlEditor;
 
         public MainForm()
         {
@@ -196,6 +198,7 @@ namespace SqlServerManager
             
             // Data operations
             var viewDataMenuItem = new ToolStripMenuItem("View Data", null, ViewTableData_Click);
+            var printTableMenuItem = new ToolStripMenuItem("Print Table Data", null, PrintTableData_Click);
             var editDataMenuItem = new ToolStripMenuItem("Edit Data", null, EditTableData_Click);
             var insertDataMenuItem = new ToolStripMenuItem("Insert Data", null, InsertTableData_Click);
             
@@ -224,6 +227,7 @@ namespace SqlServerManager
                 deleteTableMenuItem,
                 new ToolStripSeparator(),
                 viewDataMenuItem,
+                printTableMenuItem,
                 editDataMenuItem,
                 insertDataMenuItem,
                 new ToolStripSeparator(),
@@ -269,9 +273,16 @@ namespace SqlServerManager
 
             tablesTab.Controls.Add(tablesSplitContainer);
 
+            // Create SQL Editor Tab
+            var sqlEditorTab = new TabPage("Query Builder");
+            var sqlEditor = new SqlEditorControl();
+            sqlEditor.Dock = DockStyle.Fill;
+            sqlEditorTab.Controls.Add(sqlEditor);
+            
             // Add tabs to TabControl
             mainTabControl.TabPages.Add(databasesTab);
             mainTabControl.TabPages.Add(tablesTab);
+            mainTabControl.TabPages.Add(sqlEditorTab);
 
             // Add controls to form
             this.Controls.Add(mainTabControl);
@@ -279,6 +290,9 @@ namespace SqlServerManager
             this.Controls.Add(mainMenuStrip);
             this.Controls.Add(statusStrip);
             this.MainMenuStrip = mainMenuStrip;
+            
+            // Store reference to SQL Editor for connection updates
+            this.sqlEditor = sqlEditor;
         }
 
         private async void ConnectButton_Click(object sender, EventArgs e)
@@ -325,6 +339,12 @@ namespace SqlServerManager
                         disconnectButton.Enabled = true;
                         refreshButton.Enabled = true;
                         statusLabel.Text = "Connected successfully";
+                        
+                        // Update SQL Editor connection
+                        if (sqlEditor != null)
+                        {
+                            sqlEditor.UpdateConnection(currentConnection);
+                        }
                         
                         // Load databases
                         await LoadDatabasesAsync();
@@ -374,6 +394,12 @@ namespace SqlServerManager
             columnsGridView.DataSource = null;
             currentDatabaseName = null;
             statusLabel.Text = "Disconnected";
+            
+            // Clear SQL Editor connection
+            if (sqlEditor != null)
+            {
+                sqlEditor.UpdateConnection(null);
+            }
             
             // Automatically show connection dialog for reconnection
             var result = MessageBox.Show(
@@ -736,11 +762,13 @@ namespace SqlServerManager
             // File Menu
             var fileMenu = new ToolStripMenuItem("&File");
             var connectMenuItem = new ToolStripMenuItem("&Connect...", null, ConnectButton_Click);
+            var discoverServersMenuItem = new ToolStripMenuItem("&Discover Servers...", null, DiscoverServers_Click);
             var disconnectMenuItem = new ToolStripMenuItem("&Disconnect", null, DisconnectButton_Click);
             var quitMenuItem = new ToolStripMenuItem("&Quit", null, QuitButton_Click);
             quitMenuItem.ShortcutKeys = Keys.Control | Keys.Q;
             
             fileMenu.DropDownItems.Add(connectMenuItem);
+            fileMenu.DropDownItems.Add(discoverServersMenuItem);
             fileMenu.DropDownItems.Add(disconnectMenuItem);
             fileMenu.DropDownItems.Add(new ToolStripSeparator());
             fileMenu.DropDownItems.Add(quitMenuItem);
@@ -777,7 +805,17 @@ namespace SqlServerManager
             refreshMenuItem.ShortcutKeys = Keys.F5;
             viewMenu.DropDownItems.Add(refreshMenuItem);
 
-            // Help Menu
+            // Tools Menu
+            var toolsMenu = new ToolStripMenuItem("&Tools");
+            var scriptDatabaseMenuItem = new ToolStripMenuItem("&Script Database...", null, ScriptDatabase_Click);
+            var importDataMenuItem = new ToolStripMenuItem("&Import Data...", null, ImportDatabaseData_Click);
+            var exportDataMenuItem = new ToolStripMenuItem("&Export Data...", null, ExportDatabaseData_Click);
+            toolsMenu.DropDownItems.Add(scriptDatabaseMenuItem);
+            toolsMenu.DropDownItems.Add(new ToolStripSeparator());
+            toolsMenu.DropDownItems.Add(importDataMenuItem);
+            toolsMenu.DropDownItems.Add(exportDataMenuItem);
+
+             // Help Menu
             var helpMenu = new ToolStripMenuItem("&Help");
             var aboutMenuItem = new ToolStripMenuItem("&About", null, (s, e) => 
             {
@@ -787,8 +825,104 @@ namespace SqlServerManager
             helpMenu.DropDownItems.Add(aboutMenuItem);
 
             mainMenuStrip.Items.Add(fileMenu);
-            mainMenuStrip.Items.Add(viewMenu);
+            mainMenuStrip.Items.Add(toolsMenu);
             mainMenuStrip.Items.Add(helpMenu);
+        }
+
+        private void DiscoverServers_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                using (var discoveryDialog = new ServerDiscoveryDialog())
+                {
+                    ThemeManager.ApplyThemeToDialog(discoveryDialog);
+                    FontManager.ApplyFontSize(discoveryDialog, currentFontScale);
+                    
+                    if (discoveryDialog.ShowDialog() == DialogResult.OK && !discoveryDialog.UserCancelled)
+                    {
+                        var selectedInstance = discoveryDialog.SelectedInstance;
+                        if (selectedInstance != null)
+                        {
+                            // Create connection dialog with the discovered server pre-filled
+                            using (var connectionDialog = new ConnectionDialog())
+                            {
+                                // Set the server name in the connection dialog
+                                connectionDialog.ServerName = selectedInstance.ServerName;
+                                
+                                ThemeManager.ApplyThemeToDialog(connectionDialog);
+                                FontManager.ApplyFontSize(connectionDialog, currentFontScale);
+                                
+                                if (connectionDialog.ShowDialog() == DialogResult.OK)
+                                {
+                                    // Use the existing connection logic
+                                    ConnectWithConnectionString(connectionDialog.ConnectionString);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening server discovery dialog: {ex.Message}", "Discovery Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private async void ConnectWithConnectionString(string connectionString)
+        {
+            // Disable connect button and show progress
+            connectButton.Enabled = false;
+            statusLabel.Text = "Connecting...";
+            
+            try
+            {
+                currentConnectionString = connectionString;
+                currentConnection = new SqlConnection(currentConnectionString);
+                
+                // Use async open
+                await currentConnection.OpenAsync();
+                
+                // Test connection
+                using (var command = new SqlCommand("SELECT 1", currentConnection))
+                {
+                    await command.ExecuteScalarAsync();
+                }
+                
+                // Save successful connection
+                SaveConnection(currentConnectionString);
+                
+                // Update UI
+                connectionLabel.Text = $"Connected to: {currentConnection.DataSource}";
+                connectionLabel.ForeColor = Color.Green;
+                disconnectButton.Enabled = true;
+                refreshButton.Enabled = true;
+                statusLabel.Text = "Connected successfully";
+                
+                // Update SQL Editor connection
+                if (sqlEditor != null)
+                {
+                    sqlEditor.UpdateConnection(currentConnection);
+                }
+                
+                // Load databases
+                await LoadDatabasesAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Connection failed: {ex.Message}", "Connection Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (currentConnection != null)
+                {
+                    currentConnection.Close();
+                    currentConnection.Dispose();
+                    currentConnection = null;
+                }
+                
+                // Re-enable connect button on failure
+                connectButton.Enabled = true;
+                statusLabel.Text = "Connection failed";
+            }
         }
 
         private void QuitButton_Click(object sender, EventArgs e)
@@ -799,6 +933,26 @@ namespace SqlServerManager
             {
                 Application.Exit();
             }
+        }
+
+        private void PrintTableData_Click(object sender, EventArgs e)
+        {
+            if (tablesGridView.CurrentRow == null)
+            {
+                MessageBox.Show("Please select a table to print.", "No Selection",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var dt = (DataTable)tablesGridView.DataSource;
+            if (dt == null)
+            {
+                MessageBox.Show("No data to print.", "No Data",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            PrintUtility.PrintDataTable(dt, $"Table: {tablesGridView.CurrentRow.Cells[1].Value}");
         }
 
         private void ApplyTheme(ThemeManager.Theme theme)
@@ -1176,24 +1330,50 @@ namespace SqlServerManager
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            
-            MessageBox.Show("Database scripting functionality would be implemented here.\n\n" +
-                "This feature typically requires SQL Server Management Objects (SMO) libraries.", 
-                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            string dbName = databaseListBox.SelectedItem.ToString();
+            using (var dialog = new UI.DatabaseScriptGenerator(currentConnection, dbName))
+            {
+                ThemeManager.ApplyThemeToDialog(dialog);
+                dialog.ShowDialog();
+            }
         }
 
         private void ExportDatabaseData_Click(object sender, EventArgs e)
         {
+            if (currentConnection == null || currentConnection.State != ConnectionState.Open)
+            {
+                MessageBox.Show("Please connect to a SQL Server instance first.", "No Connection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             if (databaseListBox.SelectedItem == null)
             {
                 MessageBox.Show("Please select a database to export.", "No Selection", 
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            
-            MessageBox.Show("Database data export functionality would be implemented here.\n\n" +
-                "This could export to CSV, XML, or SQL INSERT statements.", 
-                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            string dbName = databaseListBox.SelectedItem.ToString();
+            try
+            {
+                using (var dialog = new UI.DataImportExportDialog(currentConnection, dbName, null, null, UI.DataImportExportDialog.OperationType.Export))
+                {
+                    ThemeManager.ApplyThemeToDialog(dialog);
+                    FontManager.ApplyFontSize(dialog, currentFontScale);
+                    
+                    if (dialog.ShowDialog() == DialogResult.OK)
+                    {
+                        statusLabel.Text = "Export completed successfully";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening export dialog: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void ImportDatabaseData_Click(object sender, EventArgs e)
@@ -1204,10 +1384,13 @@ namespace SqlServerManager
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            
-            MessageBox.Show("Database data import functionality would be implemented here.\n\n" +
-                "This could import from CSV, XML, or SQL scripts.", 
-                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            string dbName = databaseListBox.SelectedItem.ToString();
+            using (var dialog = new UI.DataImportExportDialog(currentConnection, dbName, null, null, UI.DataImportExportDialog.OperationType.Import))
+            {
+                ThemeManager.ApplyThemeToDialog(dialog);
+                dialog.ShowDialog();
+            }
         }
 
         // Table action methods
@@ -1635,9 +1818,27 @@ namespace SqlServerManager
                 return;
             }
 
-            MessageBox.Show("Table data export functionality would be implemented here.\n\n" +
-                "This could export table data to CSV, Excel, or other formats.", 
-                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            try
+            {
+                using (var exportDialog = new SqlServerManager.UI.DataImportExportDialog(currentConnection, currentDatabaseName, schema, tableName, SqlServerManager.UI.DataImportExportDialog.OperationType.Export))
+                {
+                    ThemeManager.ApplyThemeToDialog(exportDialog);
+                    FontManager.ApplyFontSize(exportDialog, currentFontScale);
+                    
+                    if (exportDialog.ShowDialog() == DialogResult.OK)
+                    {
+                        statusLabel.Text = "Export completed successfully";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening export dialog: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void ImportTableData_Click(object sender, EventArgs e)
@@ -1649,9 +1850,28 @@ namespace SqlServerManager
                 return;
             }
 
-            MessageBox.Show("Table data import functionality would be implemented here.\n\n" +
-                "This could import data from CSV, Excel, or other formats.", 
-                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            try
+            {
+                using (var importDialog = new SqlServerManager.UI.DataImportExportDialog(currentConnection, currentDatabaseName, schema, tableName, SqlServerManager.UI.DataImportExportDialog.OperationType.Import))
+                {
+                    ThemeManager.ApplyThemeToDialog(importDialog);
+                    FontManager.ApplyFontSize(importDialog, currentFontScale);
+                    
+                    if (importDialog.ShowDialog() == DialogResult.OK)
+                    {
+                        statusLabel.Text = "Import completed successfully";
+                        // Optionally refresh the table data view if it's currently open
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening import dialog: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void ScriptTable_Click(object sender, EventArgs e)
@@ -1663,9 +1883,23 @@ namespace SqlServerManager
                 return;
             }
 
-            MessageBox.Show("Table scripting functionality would be implemented here.\n\n" +
-                "This would generate CREATE TABLE scripts and optionally INSERT statements.", 
-                "Feature Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            string tableName = tablesGridView.CurrentRow.Cells["Table Name"].Value.ToString();
+            string schema = tablesGridView.CurrentRow.Cells["Schema"].Value.ToString();
+            
+            try
+            {
+                using (var scriptGenerator = new SqlServerManager.UI.TableScriptGenerator(currentConnection, currentDatabaseName, schema, tableName))
+                {
+                    ThemeManager.ApplyThemeToDialog(scriptGenerator);
+                    FontManager.ApplyFontSize(scriptGenerator, currentFontScale);
+                    scriptGenerator.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening script generator: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
     }
 }

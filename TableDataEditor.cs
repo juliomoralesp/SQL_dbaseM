@@ -45,8 +45,11 @@ namespace SqlServerManager
             columnTypes = new Dictionary<string, string>();
             
             InitializeComponent();
-            LoadTableSchema();
-            LoadTableData();
+            _ = Task.Run(async () =>
+            {
+                await LoadTableSchemaAsync().ConfigureAwait(false);
+                await LoadTableDataAsync().ConfigureAwait(false);
+            });
         }
 
         private void InitializeComponent()
@@ -116,7 +119,7 @@ namespace SqlServerManager
             this.Controls.Add(statusStrip);
         }
 
-        private async void LoadTableSchema()
+        private async Task LoadTableSchemaAsync()
         {
             try
             {
@@ -138,11 +141,16 @@ namespace SqlServerManager
                     command.Parameters.AddWithValue("@schema", schemaName);
                     command.Parameters.AddWithValue("@table", tableName);
                     
+                    LoggingService.LogInformation($"Loading primary keys for {schemaName}.{tableName}");
+                    LoggingService.LogDebug($"PK Query: {pkQuery}");
+                    
                     using (var reader = await command.ExecuteReaderAsync())
                     {
                         while (await reader.ReadAsync())
                         {
-                            primaryKeyColumns.Add(reader["COLUMN_NAME"].ToString());
+                            var pkColumn = reader["COLUMN_NAME"].ToString();
+                            LoggingService.LogInformation($"Found primary key column: '{pkColumn}'");
+                            primaryKeyColumns.Add(pkColumn);
                         }
                     }
                 }
@@ -184,11 +192,19 @@ namespace SqlServerManager
             }
         }
 
-        private async void LoadTableData()
+        private async Task LoadTableDataAsync()
         {
             try
             {
-                statusLabel.Text = "Loading data...";
+                // Update UI on UI thread
+                if (this.InvokeRequired)
+                {
+                    this.Invoke(() => statusLabel.Text = "Loading data...");
+                }
+                else
+                {
+                    statusLabel.Text = "Loading data...";
+                }
                 
                 var query = $@"USE [{databaseName}]; SELECT * FROM [{schemaName}].[{tableName}]";
                 
@@ -200,70 +216,118 @@ namespace SqlServerManager
                     
                     // Create a copy for editing
                     currentData = originalData.Copy();
-                    dataGridView.DataSource = currentData;
                     
-                    // Configure columns
-                    ConfigureDataGridColumns();
+                    // Update UI on UI thread
+                    if (dataGridView.InvokeRequired)
+                    {
+                        dataGridView.Invoke(() => 
+                        {
+                            dataGridView.DataSource = currentData;
+                            ConfigureDataGridColumns();
+                        });
+                    }
+                    else
+                    {
+                        dataGridView.DataSource = currentData;
+                        ConfigureDataGridColumns();
+                    }
                 }
 
                 hasChanges = false;
                 modifiedRows.Clear();
                 newRows.Clear();
                 deletedRows.Clear();
-                UpdateButtonStates();
                 
-                statusLabel.Text = $"Loaded {currentData.Rows.Count} rows";
+                // Update UI on UI thread
+                if (this.InvokeRequired)
+                {
+                    this.Invoke(() => 
+                    {
+                        UpdateButtonStates();
+                        statusLabel.Text = $"Loaded {currentData.Rows.Count} rows";
+                    });
+                }
+                else
+                {
+                    UpdateButtonStates();
+                    statusLabel.Text = $"Loaded {currentData.Rows.Count} rows";
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error loading data: {ex.Message}", "Error", 
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-                statusLabel.Text = "Error loading data";
+                // Update UI on UI thread
+                if (this.InvokeRequired)
+                {
+                    this.BeginInvoke(() => 
+                    {
+                        MessageBox.Show($"Error loading data: {ex.Message}", "Error", 
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        statusLabel.Text = "Error loading data";
+                    });
+                }
+                else
+                {
+                    MessageBox.Show($"Error loading data: {ex.Message}", "Error", 
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    statusLabel.Text = "Error loading data";
+                }
             }
         }
 
         private void ConfigureDataGridColumns()
         {
-            foreach (DataGridViewColumn column in dataGridView.Columns)
+            try
             {
-                var columnName = column.Name;
+                // Create a copy of the columns collection to avoid modification during enumeration
+                var columns = dataGridView.Columns.Cast<DataGridViewColumn>().ToList();
                 
-                // Make primary key columns read-only for existing rows
-                if (primaryKeyColumns.Contains(columnName))
+                foreach (DataGridViewColumn column in columns)
                 {
-                    column.HeaderText = $"{columnName} (PK)";
-                    column.DefaultCellStyle.BackColor = Color.LightGray;
-                }
-                
-                // Set appropriate cell types based on data type
-                if (columnTypes.ContainsKey(columnName))
-                {
-                    var dataType = columnTypes[columnName].ToLower();
+                    var columnName = column.Name;
                     
-                    switch (dataType)
+                    // Make primary key columns read-only for existing rows
+                    if (primaryKeyColumns.Contains(columnName))
                     {
-                        case "bit":
-                            // Convert to checkbox column
-                            var checkColumn = new DataGridViewCheckBoxColumn();
-                            checkColumn.Name = columnName;
-                            checkColumn.HeaderText = columnName;
-                            checkColumn.DataPropertyName = columnName;
-                            checkColumn.TrueValue = true;
-                            checkColumn.FalseValue = false;
-                            checkColumn.IndeterminateValue = DBNull.Value;
-                            
-                            dataGridView.Columns.Remove(column);
-                            dataGridView.Columns.Add(checkColumn);
-                            break;
-                            
-                        case "datetime":
-                        case "datetime2":
-                        case "date":
-                        case "time":
-                            column.DefaultCellStyle.Format = "yyyy-MM-dd HH:mm:ss";
-                            break;
+                        column.HeaderText = $"{columnName} (PK)";
+                        column.DefaultCellStyle.BackColor = Color.LightGray;
+                    }
+                    
+                    // Set appropriate cell types based on data type
+                    if (columnTypes.ContainsKey(columnName))
+                    {
+                        var dataType = columnTypes[columnName].ToLower();
+                        
+                        switch (dataType)
+                        {
+                            case "bit":
+                                // Convert to checkbox column
+                                var checkColumn = new DataGridViewCheckBoxColumn();
+                                checkColumn.Name = columnName;
+                                checkColumn.HeaderText = columnName;
+                                checkColumn.DataPropertyName = columnName;
+                                checkColumn.TrueValue = true;
+                                checkColumn.FalseValue = false;
+                                checkColumn.IndeterminateValue = DBNull.Value;
+                                
+                                var columnIndex = dataGridView.Columns.IndexOf(column);
+                                dataGridView.Columns.Remove(column);
+                                dataGridView.Columns.Insert(columnIndex, checkColumn);
+                                break;
+                                
+                            case "datetime":
+                            case "datetime2":
+                            case "date":
+                            case "time":
+                                column.DefaultCellStyle.Format = "yyyy-MM-dd HH:mm:ss";
+                                break;
+                        }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                // Log error but don't crash the application
+                System.Diagnostics.Debug.WriteLine($"Error configuring DataGrid columns: {ex.Message}");
             }
         }
 
@@ -292,8 +356,33 @@ namespace SqlServerManager
 
         private void DataGridView_DataError(object sender, DataGridViewDataErrorEventArgs e)
         {
-            MessageBox.Show($"Data error in column {dataGridView.Columns[e.ColumnIndex].HeaderText}: {e.Exception.Message}", 
-                "Data Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            try
+            {
+                // Use thread-safe UI updates
+                if (this.InvokeRequired)
+                {
+                    this.BeginInvoke(() => 
+                    {
+                        var columnName = e.ColumnIndex >= 0 && e.ColumnIndex < dataGridView.Columns.Count 
+                            ? dataGridView.Columns[e.ColumnIndex].HeaderText 
+                            : "Unknown";
+                        MessageBox.Show($"Data error in column {columnName}: {e.Exception.Message}", 
+                            "Data Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    });
+                }
+                else
+                {
+                    var columnName = e.ColumnIndex >= 0 && e.ColumnIndex < dataGridView.Columns.Count 
+                        ? dataGridView.Columns[e.ColumnIndex].HeaderText 
+                        : "Unknown";
+                    MessageBox.Show($"Data error in column {columnName}: {e.Exception.Message}", 
+                        "Data Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+            catch
+            {
+                // Fallback - just prevent the error from bubbling up
+            }
             e.Cancel = true;
         }
 
@@ -457,23 +546,49 @@ namespace SqlServerManager
         {
             foreach (var rowIndex in modifiedRows)
             {
-                if (rowIndex >= currentData.Rows.Count) continue;
-                
-                var currentRow = currentData.Rows[rowIndex];
-                var originalRow = originalData.Rows[rowIndex];
-                
-                var setClause = BuildSetClause(currentRow, originalRow);
-                if (string.IsNullOrEmpty(setClause)) continue; // No actual changes
-                
-                var whereClause = BuildWhereClause(originalRow);
-                
-                var updateQuery = $"USE [{databaseName}]; UPDATE [{schemaName}].[{tableName}] SET {setClause} WHERE {whereClause}";
-                
-                using (var command = new SqlCommand(updateQuery, connection, transaction))
+                try
                 {
-                    AddSetParameters(command, currentRow, originalRow);
-                    AddWhereParameters(command, originalRow);
-                    await command.ExecuteNonQueryAsync();
+                    if (rowIndex >= currentData.Rows.Count) continue;
+                    
+                    var currentRow = currentData.Rows[rowIndex];
+                    var originalRow = originalData.Rows[rowIndex];
+                    
+                    // Enhanced DataTable debugging
+                    LoggingService.LogInformation($"=== PROCESSING UPDATE FOR ROW {rowIndex} ===");
+                    LoggingService.LogInformation($"Current DataTable info: Name='{currentData.TableName}', Columns={currentData.Columns.Count}");
+                    LoggingService.LogInformation($"Original DataTable info: Name='{originalData.TableName}', Columns={originalData.Columns.Count}");
+                    LoggingService.LogInformation($"Current row table info: Name='{currentRow.Table?.TableName ?? "NULL"}', Columns={currentRow.Table?.Columns.Count ?? 0}");
+                    LoggingService.LogInformation($"Original row table info: Name='{originalRow.Table?.TableName ?? "NULL"}', Columns={originalRow.Table?.Columns.Count ?? 0}");
+                    LoggingService.LogInformation($"Available columns: {string.Join(", ", currentData.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}");
+                    LoggingService.LogInformation($"Primary keys: {string.Join(", ", primaryKeyColumns)}");
+                    
+                    var setClause = BuildSetClause(currentRow, originalRow);
+                    if (string.IsNullOrEmpty(setClause)) continue; // No actual changes
+                    
+                    LoggingService.LogInformation($"Set clause built successfully: {setClause}");
+                    
+                    var whereClause = BuildWhereClause(originalRow);
+                    LoggingService.LogInformation($"Where clause built successfully: {whereClause}");
+                    
+                    var updateQuery = $"USE [{databaseName}]; UPDATE [{schemaName}].[{tableName}] SET {setClause} WHERE {whereClause}";
+                    LoggingService.LogInformation($"Executing update query: {updateQuery}");
+                    
+                    using (var command = new SqlCommand(updateQuery, connection, transaction))
+                    {
+                        LoggingService.LogInformation($"About to call AddSetParameters...");
+                        AddSetParameters(command, currentRow, originalRow);
+                        LoggingService.LogInformation($"AddSetParameters completed. About to call AddWhereParameters...");
+                        AddWhereParameters(command, originalRow);
+                        LoggingService.LogInformation($"AddWhereParameters completed. About to execute query...");
+                        await command.ExecuteNonQueryAsync();
+                        LoggingService.LogInformation($"Query executed successfully for row {rowIndex}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LoggingService.LogError($"Error processing update for row {rowIndex}: {ex.Message}", ex);
+                    LoggingService.LogError($"Exception details: {ex}");
+                    throw new Exception($"Error updating row {rowIndex}: {ex.Message}", ex);
                 }
             }
         }
@@ -482,25 +597,51 @@ namespace SqlServerManager
         {
             foreach (var rowIndex in newRows)
             {
-                if (rowIndex >= currentData.Rows.Count) continue;
-                
-                var row = currentData.Rows[rowIndex];
-                var columns = string.Join(", ", currentData.Columns.Cast<DataColumn>()
-                    .Select(c => $"[{c.ColumnName}]"));
-                var values = string.Join(", ", currentData.Columns.Cast<DataColumn>()
-                    .Select(c => SanitizeParameterName(c.ColumnName, "")));
-                
-                var insertQuery = $"USE [{databaseName}]; INSERT INTO [{schemaName}].[{tableName}] ({columns}) VALUES ({values})";
-                
-                using (var command = new SqlCommand(insertQuery, connection, transaction))
+                try
                 {
-                    foreach (DataColumn column in currentData.Columns)
+                    if (rowIndex >= currentData.Rows.Count) continue;
+                    
+                    var row = currentData.Rows[rowIndex];
+                    LoggingService.LogInformation($"Processing insertion for row {rowIndex}. Available columns: {string.Join(", ", currentData.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}");
+                    
+                    var columns = string.Join(", ", currentData.Columns.Cast<DataColumn>()
+                        .Select(c => $"[{c.ColumnName}]"));
+                    var values = string.Join(", ", currentData.Columns.Cast<DataColumn>()
+                        .Select(c => SanitizeParameterName(c.ColumnName, "")));
+                    
+                    var insertQuery = $"USE [{databaseName}]; INSERT INTO [{schemaName}].[{tableName}] ({columns}) VALUES ({values})";
+                    LoggingService.LogInformation($"Executing insert query: {insertQuery}");
+                    
+                    using (var command = new SqlCommand(insertQuery, connection, transaction))
                     {
-                        var value = row[column] == DBNull.Value ? null : row[column];
-                        var paramName = SanitizeParameterName(column.ColumnName, "");
-                        command.Parameters.AddWithValue(paramName, value ?? DBNull.Value);
+                        foreach (DataColumn column in currentData.Columns)
+                        {
+                            try
+                            {
+                                if (!row.Table.Columns.Contains(column.ColumnName))
+                                {
+                                    LoggingService.LogError($"Column '{column.ColumnName}' does not exist in row. Available columns: {string.Join(", ", row.Table.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}");
+                                    continue;
+                                }
+                                
+                                var value = row[column] == DBNull.Value ? null : row[column];
+                                var paramName = SanitizeParameterName(column.ColumnName, "");
+                                LoggingService.LogDebug($"Adding INSERT parameter: {paramName} = {value ?? "NULL"}");
+                                command.Parameters.AddWithValue(paramName, value ?? DBNull.Value);
+                            }
+                            catch (Exception ex)
+                            {
+                                LoggingService.LogError($"Error adding INSERT parameter for column '{column.ColumnName}': {ex.Message}", ex);
+                                throw;
+                            }
+                        }
+                        await command.ExecuteNonQueryAsync();
                     }
-                    await command.ExecuteNonQueryAsync();
+                }
+                catch (Exception ex)
+                {
+                    LoggingService.LogError($"Error processing insertion for row {rowIndex}: {ex.Message}", ex);
+                    throw new Exception($"Error inserting row {rowIndex}: {ex.Message}", ex);
                 }
             }
         }
@@ -529,12 +670,41 @@ namespace SqlServerManager
         {
             var columnsToUse = primaryKeyColumns.Count > 0 ? primaryKeyColumns : 
                 currentData.Columns.Cast<DataColumn>().Select(c => c.ColumnName);
+            
+            // Enhanced debugging
+            LoggingService.LogInformation($"AddWhereParameters: Primary key columns: [{string.Join(", ", primaryKeyColumns)}]");
+            LoggingService.LogInformation($"AddWhereParameters: Current data columns: [{string.Join(", ", currentData.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}]");
+            LoggingService.LogInformation($"AddWhereParameters: Row table columns: [{string.Join(", ", row.Table.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}]");
+            LoggingService.LogInformation($"AddWhereParameters: Columns to use: [{string.Join(", ", columnsToUse)}]");
+            LoggingService.LogInformation($"AddWhereParameters: Row table name: '{row.Table.TableName}', Current data table name: '{currentData.TableName}'");
                 
             foreach (var columnName in columnsToUse)
             {
-                var value = row[columnName] == DBNull.Value ? null : row[columnName];
-                var paramName = SanitizeParameterName(columnName, "where_");
-                command.Parameters.AddWithValue(paramName, value ?? DBNull.Value);
+                try
+                {
+                    LoggingService.LogDebug($"Processing column: '{columnName}'");
+                    
+                    // Check if column exists in the row
+                    if (!row.Table.Columns.Contains(columnName))
+                    {
+                        LoggingService.LogError($"COLUMN MISMATCH: Column '{columnName}' does not exist in row's DataTable.");
+                        LoggingService.LogError($"  - Row's table columns: [{string.Join(", ", row.Table.Columns.Cast<DataColumn>().Select(c => $"'{c.ColumnName}'"))}]");
+                        LoggingService.LogError($"  - Expected column: '{columnName}'");
+                        LoggingService.LogError($"  - Row's table: '{row.Table.TableName}' vs Current table: '{currentData.TableName}'");
+                        LoggingService.LogError($"  - Are they the same reference? {object.ReferenceEquals(row.Table, currentData)}");
+                        throw new ArgumentException($"Column '{columnName}' does not belong to table.");
+                    }
+                    
+                    var value = row[columnName] == DBNull.Value ? null : row[columnName];
+                    var paramName = SanitizeParameterName(columnName, "where_");
+                    LoggingService.LogDebug($"Adding WHERE parameter: {paramName} = {value ?? "NULL"}");
+                    command.Parameters.AddWithValue(paramName, value ?? DBNull.Value);
+                }
+                catch (Exception ex)
+                {
+                    LoggingService.LogError($"Error adding WHERE parameter for column '{columnName}': {ex.Message}", ex);
+                    throw;
+                }
             }
         }
 
@@ -544,13 +714,38 @@ namespace SqlServerManager
             
             foreach (DataColumn column in currentData.Columns)
             {
-                var currentValue = currentRow[column];
-                var originalValue = originalRow[column];
-                
-                if (!Equals(currentValue, originalValue))
+                try
                 {
-                    var paramName = SanitizeParameterName(column.ColumnName, "set_");
-                    changes.Add($"[{column.ColumnName}] = {paramName}");
+                    // Use column name instead of DataColumn object to avoid cross-table reference issues
+                    var columnName = column.ColumnName;
+                    
+                    // Verify column exists in both rows
+                    if (!currentRow.Table.Columns.Contains(columnName))
+                    {
+                        LoggingService.LogError($"Column '{columnName}' does not exist in current row table. Available columns: {string.Join(", ", currentRow.Table.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}");
+                        continue;
+                    }
+                    
+                    if (!originalRow.Table.Columns.Contains(columnName))
+                    {
+                        LoggingService.LogError($"Column '{columnName}' does not exist in original row table. Available columns: {string.Join(", ", originalRow.Table.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}");
+                        continue;
+                    }
+                    
+                    var currentValue = currentRow[columnName];
+                    var originalValue = originalRow[columnName];
+                    
+                    if (!Equals(currentValue, originalValue))
+                    {
+                        var paramName = SanitizeParameterName(columnName, "set_");
+                        changes.Add($"[{columnName}] = {paramName}");
+                        LoggingService.LogDebug($"Change detected in column '{columnName}': '{originalValue}' -> '{currentValue}'");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LoggingService.LogError($"Error processing column '{column.ColumnName}' in BuildSetClause: {ex.Message}", ex);
+                    throw;
                 }
             }
             
@@ -561,14 +756,38 @@ namespace SqlServerManager
         {
             foreach (DataColumn column in currentData.Columns)
             {
-                var currentValue = currentRow[column];
-                var originalValue = originalRow[column];
-                
-                if (!Equals(currentValue, originalValue))
+                var columnName = column.ColumnName;
+                try
                 {
-                    var value = currentValue == DBNull.Value ? null : currentValue;
-                    var paramName = SanitizeParameterName(column.ColumnName, "set_");
-                    command.Parameters.AddWithValue(paramName, value ?? DBNull.Value);
+                    // Verify column exists in both rows
+                    if (!currentRow.Table.Columns.Contains(columnName))
+                    {
+                        LoggingService.LogError($"Column '{columnName}' does not exist in current row. Available columns: {string.Join(", ", currentRow.Table.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}");
+                        continue;
+                    }
+                    
+                    if (!originalRow.Table.Columns.Contains(columnName))
+                    {
+                        LoggingService.LogError($"Column '{columnName}' does not exist in original row. Available columns: {string.Join(", ", originalRow.Table.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}");
+                        continue;
+                    }
+                    
+                    // Use column names instead of DataColumn objects
+                    var currentValue = currentRow[columnName];
+                    var originalValue = originalRow[columnName];
+                    
+                    if (!Equals(currentValue, originalValue))
+                    {
+                        var value = currentValue == DBNull.Value ? null : currentValue;
+                        var paramName = SanitizeParameterName(columnName, "set_");
+                        LoggingService.LogDebug($"Adding SET parameter: {paramName} = {value ?? "NULL"} (was {originalValue ?? "NULL"})");
+                        command.Parameters.AddWithValue(paramName, value ?? DBNull.Value);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LoggingService.LogError($"Error adding SET parameter for column '{columnName}': {ex.Message}", ex);
+                    throw;
                 }
             }
         }
@@ -649,6 +868,88 @@ namespace SqlServerManager
             }
             
             return paramName;
+        }
+
+        private async void LoadTableData()
+        {
+            try
+            {
+                statusLabel.Text = "Loading table data...";
+                
+                // Clear existing data
+                currentData = null;
+                originalData = null;
+                primaryKeyColumns.Clear();
+                newRows.Clear();
+                modifiedRows.Clear();
+                deletedRows.Clear();
+                hasChanges = false;
+                
+                // Load primary key information
+                await LoadPrimaryKeyInfo();
+                
+                // Load table data
+                var query = $"USE [{databaseName}]; SELECT * FROM [{schemaName}].[{tableName}]";
+                
+                using (var adapter = new SqlDataAdapter(query, connection))
+                {
+                    currentData = new DataTable();
+                    await Task.Run(() => adapter.Fill(currentData));
+                }
+                
+                // Create a copy of original data
+                originalData = currentData.Copy();
+                
+                // Bind to DataGridView
+                dataGridView.DataSource = currentData;
+                
+                // Configure grid appearance
+                ConfigureDataGridView();
+                
+                UpdateButtonStates();
+                statusLabel.Text = $"Loaded {currentData.Rows.Count} rows";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error loading table data: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                statusLabel.Text = "Error loading data";
+            }
+        }
+        
+        private async Task LoadPrimaryKeyInfo()
+        {
+            var query = $@"USE [{databaseName}];
+                SELECT COLUMN_NAME 
+                FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE 
+                WHERE TABLE_SCHEMA = '{schemaName}' 
+                  AND TABLE_NAME = '{tableName}' 
+                  AND CONSTRAINT_NAME LIKE 'PK_%'
+                ORDER BY ORDINAL_POSITION";
+                
+            using (var command = new SqlCommand(query, connection))
+            {
+                using (var reader = await command.ExecuteReaderAsync())
+                {
+                    while (reader.Read())
+                    {
+                        primaryKeyColumns.Add(reader.GetString(0));
+                    }
+                }
+            }
+        }
+        
+        private void ConfigureDataGridView()
+        {
+            foreach (DataGridViewColumn column in dataGridView.Columns)
+            {
+                // Make primary key columns read-only if editing existing records
+                if (primaryKeyColumns.Contains(column.Name))
+                {
+                    column.ReadOnly = false; // Allow editing for new records
+                    column.DefaultCellStyle.BackColor = Color.LightYellow;
+                }
+            }
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
