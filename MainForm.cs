@@ -7,6 +7,7 @@ using System.Linq;
 using System.Windows.Forms;
 using System.Configuration;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using SqlServerManager.UI;
 
@@ -24,11 +25,11 @@ namespace SqlServerManager
         private DataGridView columnsGridView;
         private MenuStrip mainMenuStrip;
         private ToolStrip mainToolStrip;
-        private StatusStrip statusStrip;
-        private ToolStripStatusLabel statusLabel;
+        private EnhancedStatusBar enhancedStatusBar;
         private ToolStripButton connectButton;
         private ToolStripButton disconnectButton;
         private ToolStripButton refreshButton;
+        private ToolStripButton importWizardButton;
         private ToolStripButton quitButton;
         private ToolStripLabel connectionLabel;
         private ContextMenuStrip databaseContextMenu;
@@ -39,6 +40,10 @@ namespace SqlServerManager
         private string currentDatabaseName;
         private float currentFontScale = 1.2f; // Start with 20% larger fonts
         private SqlEditorControl sqlEditor;
+        private KeyboardShortcutManager shortcutManager;
+        
+        // Public properties for keyboard shortcut integration
+        public TabControl TabControl => mainTabControl;
 
         public MainForm()
         {
@@ -101,18 +106,22 @@ namespace SqlServerManager
             quitButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
             quitButton.Alignment = ToolStripItemAlignment.Right;
             
+            importWizardButton = new ToolStripButton("Import Wizard", null, ShowDataImportWizard_Click);
+            importWizardButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            importWizardButton.Enabled = false; // Enable when connected
+            
             mainToolStrip.Items.Add(connectButton);
             mainToolStrip.Items.Add(disconnectButton);
             mainToolStrip.Items.Add(new ToolStripSeparator());
             mainToolStrip.Items.Add(refreshButton);
             mainToolStrip.Items.Add(new ToolStripSeparator());
+            mainToolStrip.Items.Add(importWizardButton);
+            mainToolStrip.Items.Add(new ToolStripSeparator());
             mainToolStrip.Items.Add(connectionLabel);
             mainToolStrip.Items.Add(quitButton);
 
-            // Create StatusStrip
-            statusStrip = new StatusStrip();
-            statusLabel = new ToolStripStatusLabel("Ready");
-            statusStrip.Items.Add(statusLabel);
+            // Create EnhancedStatusBar
+            enhancedStatusBar = new EnhancedStatusBar();
 
             // Create TabControl
             mainTabControl = new TabControl();
@@ -279,20 +288,55 @@ namespace SqlServerManager
             sqlEditor.Dock = DockStyle.Fill;
             sqlEditorTab.Controls.Add(sqlEditor);
             
+            // Create Advanced SQL Editor Tab
+            var advancedSqlEditorTab = new TabPage("Advanced SQL Editor");
+            try
+            {
+                var connectionService = Services.ConfigurationService.GetService<Services.ConnectionService>();
+                var scintillaSqlEditor = new Core.QueryEngine.ScintillaSqlEditor(connectionService);
+                scintillaSqlEditor.Dock = DockStyle.Fill;
+                advancedSqlEditorTab.Controls.Add(scintillaSqlEditor);
+            }
+            catch (Exception ex)
+            {
+                LogToFile($"Failed to create Advanced SQL Editor: {ex.Message}");
+                // Add placeholder label
+                var placeholder = new Label
+                {
+                    Text = "Advanced SQL Editor not available. Check logs for details.",
+                    Dock = DockStyle.Fill,
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    ForeColor = Color.Red
+                };
+                advancedSqlEditorTab.Controls.Add(placeholder);
+            }
+            
             // Add tabs to TabControl
             mainTabControl.TabPages.Add(databasesTab);
             mainTabControl.TabPages.Add(tablesTab);
             mainTabControl.TabPages.Add(sqlEditorTab);
+            mainTabControl.TabPages.Add(advancedSqlEditorTab);
 
             // Add controls to form
             this.Controls.Add(mainTabControl);
             this.Controls.Add(mainToolStrip);
             this.Controls.Add(mainMenuStrip);
-            this.Controls.Add(statusStrip);
+            this.Controls.Add(enhancedStatusBar);
             this.MainMenuStrip = mainMenuStrip;
             
             // Store reference to SQL Editor for connection updates
             this.sqlEditor = sqlEditor;
+            
+            // Initialize keyboard shortcut manager
+            try
+            {
+                shortcutManager = new KeyboardShortcutManager(this);
+                LoggingService.LogInformation("Keyboard shortcut manager initialized");
+            }
+            catch (Exception ex)
+            {
+                LoggingService.LogWarning("Failed to initialize keyboard shortcut manager: {Exception}", ex.Message);
+            }
         }
 
         private async void ConnectButton_Click(object sender, EventArgs e)
@@ -314,7 +358,8 @@ namespace SqlServerManager
                 {
                     // Disable connect button and show progress
                     connectButton.Enabled = false;
-                    statusLabel.Text = "Connecting...";
+                    enhancedStatusBar.ShowMessage("Connecting...", MessageType.Info);
+                    enhancedStatusBar.SetConnectionStatus(false, "Connecting...");
                     
                     try
                     {
@@ -338,7 +383,9 @@ namespace SqlServerManager
                         connectionLabel.ForeColor = Color.Green;
                         disconnectButton.Enabled = true;
                         refreshButton.Enabled = true;
-                        statusLabel.Text = "Connected successfully";
+                        importWizardButton.Enabled = true;
+                        enhancedStatusBar.SetConnectionStatus(true, $"Connected to: {currentConnection.DataSource}");
+                        enhancedStatusBar.ShowMessage("Connected successfully", MessageType.Success);
                         
                         // Update SQL Editor connection
                         if (sqlEditor != null)
@@ -362,7 +409,8 @@ namespace SqlServerManager
                         
                         // Re-enable connect button on failure
                         connectButton.Enabled = true;
-                        statusLabel.Text = "Connection failed";
+                        enhancedStatusBar.SetConnectionStatus(false, "Connection failed");
+                        enhancedStatusBar.ShowMessage("Connection failed", MessageType.Error);
                     }
                 }
                 else
@@ -389,11 +437,13 @@ namespace SqlServerManager
             connectButton.Enabled = true;
             disconnectButton.Enabled = false;
             refreshButton.Enabled = false;
+            importWizardButton.Enabled = false;
             databaseListBox.Items.Clear();
             tablesGridView.DataSource = null;
             columnsGridView.DataSource = null;
             currentDatabaseName = null;
-            statusLabel.Text = "Disconnected";
+            enhancedStatusBar.SetConnectionStatus(false, "Disconnected");
+            enhancedStatusBar.ShowMessage("Disconnected", MessageType.Info);
             
             // Clear SQL Editor connection
             if (sqlEditor != null)
@@ -419,7 +469,7 @@ namespace SqlServerManager
         private async void RefreshButton_Click(object sender, EventArgs e)
         {
             refreshButton.Enabled = false;
-            statusLabel.Text = "Refreshing...";
+            enhancedStatusBar.ShowMessage("Refreshing...", MessageType.Info);
             
             try
             {
@@ -450,7 +500,7 @@ namespace SqlServerManager
                         }
                     }
                 }
-                statusLabel.Text = $"Loaded {databaseListBox.Items.Count} databases";
+                enhancedStatusBar.ShowMessage($"Loaded {databaseListBox.Items.Count} databases", MessageType.Success);
             }
             catch (Exception ex)
             {
@@ -495,7 +545,7 @@ namespace SqlServerManager
             {
                 tablesGridView.DataSource = null;
                 tablesLabel.Text = "Tables: (Not connected)";
-                statusLabel.Text = "Not connected";
+                enhancedStatusBar.ShowMessage("Not connected", MessageType.Warning);
                 return;
             }
             
@@ -519,7 +569,7 @@ namespace SqlServerManager
                     tablesGridView.DataSource = dataTable;
                     tablesLabel.Text = $"Tables in {databaseName}:";
                 }
-                statusLabel.Text = $"Loaded tables from {databaseName}";
+                enhancedStatusBar.ShowMessage($"Loaded tables from {databaseName}", MessageType.Success);
             }
             catch (Exception ex)
             {
@@ -746,6 +796,19 @@ namespace SqlServerManager
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             SaveSettings();
+            
+            // Cleanup keyboard shortcut manager
+            try
+            {
+                shortcutManager?.Dispose();
+                LoadingManager.Cleanup();
+                LoggingService.LogInformation("Application cleanup completed");
+            }
+            catch (Exception ex)
+            {
+                LoggingService.LogWarning("Error during application cleanup: {Exception}", ex.Message);
+            }
+            
             if (currentConnection != null && currentConnection.State == ConnectionState.Open)
             {
                 currentConnection.Close();
@@ -808,12 +871,14 @@ namespace SqlServerManager
             // Tools Menu
             var toolsMenu = new ToolStripMenuItem("&Tools");
             var scriptDatabaseMenuItem = new ToolStripMenuItem("&Script Database...", null, ScriptDatabase_Click);
-            var importDataMenuItem = new ToolStripMenuItem("&Import Data...", null, ImportDatabaseData_Click);
-            var exportDataMenuItem = new ToolStripMenuItem("&Export Data...", null, ExportDatabaseData_Click);
+            var importExportWizardMenuItem = new ToolStripMenuItem("Data Import/Export &Wizard...", null, ShowDataImportWizard_Click);
+            var advancedSearchMenuItem = new ToolStripMenuItem("\u0026Advanced Search...", null, AdvancedSearchMenuItem_Click);
+            advancedSearchMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.F;
             toolsMenu.DropDownItems.Add(scriptDatabaseMenuItem);
             toolsMenu.DropDownItems.Add(new ToolStripSeparator());
-            toolsMenu.DropDownItems.Add(importDataMenuItem);
-            toolsMenu.DropDownItems.Add(exportDataMenuItem);
+            toolsMenu.DropDownItems.Add(advancedSearchMenuItem);
+            toolsMenu.DropDownItems.Add(new ToolStripSeparator());
+            toolsMenu.DropDownItems.Add(importExportWizardMenuItem);
 
              // Help Menu
             var helpMenu = new ToolStripMenuItem("&Help");
@@ -873,7 +938,7 @@ namespace SqlServerManager
         {
             // Disable connect button and show progress
             connectButton.Enabled = false;
-            statusLabel.Text = "Connecting...";
+                            enhancedStatusBar.ShowMessage("Connecting...", MessageType.Info);
             
             try
             {
@@ -897,7 +962,7 @@ namespace SqlServerManager
                 connectionLabel.ForeColor = Color.Green;
                 disconnectButton.Enabled = true;
                 refreshButton.Enabled = true;
-                statusLabel.Text = "Connected successfully";
+                enhancedStatusBar.ShowMessage("Connected successfully", MessageType.Success);
                 
                 // Update SQL Editor connection
                 if (sqlEditor != null)
@@ -921,7 +986,7 @@ namespace SqlServerManager
                 
                 // Re-enable connect button on failure
                 connectButton.Enabled = true;
-                statusLabel.Text = "Connection failed";
+                enhancedStatusBar.ShowMessage("Connection failed", MessageType.Error);
             }
         }
 
@@ -958,7 +1023,7 @@ namespace SqlServerManager
         private void ApplyTheme(ThemeManager.Theme theme)
         {
             ThemeManager.ApplyTheme(this, theme);
-            statusLabel.Text = $"Theme changed to {theme}";
+            enhancedStatusBar.ShowMessage($"Theme changed to {theme}", MessageType.Info);
         }
 
         private void ApplyFontScale(float scale)
@@ -975,7 +1040,7 @@ namespace SqlServerManager
                 this.Size = new Size((int)(1200 * scale / 1.2f), (int)(700 * scale / 1.2f));
             }
             
-            statusLabel.Text = $"Font size changed to {(int)(scale * 100)}%";
+            enhancedStatusBar.ShowMessage($"Font size changed to {(int)(scale * 100)}%", MessageType.Info);
         }
 
         private void ApplyCurrentSettings()
@@ -1195,18 +1260,18 @@ namespace SqlServerManager
                         {
                             command.Parameters.AddWithValue("@backupPath", saveDialog.FileName);
                             command.CommandTimeout = 300; // 5 minutes timeout for backup
-                            statusLabel.Text = "Creating backup...";
+                            enhancedStatusBar.ShowMessage("Creating backup...", MessageType.Info);
                             command.ExecuteNonQuery();
                         }
                         MessageBox.Show($"Database '{dbName}' backed up successfully to:\n{saveDialog.FileName}", 
                             "Backup Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        statusLabel.Text = "Backup completed";
+                        enhancedStatusBar.ShowMessage("Backup completed", MessageType.Success);
                     }
                     catch (Exception ex)
                     {
                         MessageBox.Show($"Error backing up database: {ex.Message}", "Backup Error", 
                             MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        statusLabel.Text = "Backup failed";
+                        enhancedStatusBar.ShowMessage("Backup failed", MessageType.Error);
                     }
                 }
             }
@@ -1233,19 +1298,19 @@ namespace SqlServerManager
                                 {
                                     command.Parameters.AddWithValue("@backupPath", openDialog.FileName);
                                     command.CommandTimeout = 300; // 5 minutes timeout for restore
-                                    statusLabel.Text = "Restoring database...";
+                                    enhancedStatusBar.ShowMessage("Restoring database...", MessageType.Info);
                                     command.ExecuteNonQuery();
                                 }
                                 MessageBox.Show($"Database '{dbName}' restored successfully.", 
                                     "Restore Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                                 LoadDatabases();
-                                statusLabel.Text = "Restore completed";
+                                enhancedStatusBar.ShowMessage("Restore completed", MessageType.Success);
                             }
                             catch (Exception ex)
                             {
                                 MessageBox.Show($"Error restoring database: {ex.Message}", "Restore Error", 
                                     MessageBoxButtons.OK, MessageBoxIcon.Error);
-                                statusLabel.Text = "Restore failed";
+                                enhancedStatusBar.ShowMessage("Restore failed", MessageType.Error);
                             }
                         }
                     }
@@ -1275,18 +1340,18 @@ namespace SqlServerManager
                     using (var command = new SqlCommand(query, currentConnection))
                     {
                         command.CommandTimeout = 300; // 5 minutes timeout
-                        statusLabel.Text = "Shrinking database...";
+                        enhancedStatusBar.ShowMessage("Shrinking database...", MessageType.Info);
                         command.ExecuteNonQuery();
                     }
                     MessageBox.Show($"Database '{dbName}' shrunk successfully.", "Shrink Complete", 
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    statusLabel.Text = "Shrink completed";
+                    enhancedStatusBar.ShowMessage("Shrink completed", MessageType.Success);
                 }
                 catch (Exception ex)
                 {
                     MessageBox.Show($"Error shrinking database: {ex.Message}", "Shrink Error", 
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    statusLabel.Text = "Shrink failed";
+                    enhancedStatusBar.ShowMessage("Shrink failed", MessageType.Error);
                 }
             }
         }
@@ -1307,18 +1372,18 @@ namespace SqlServerManager
                 using (var command = new SqlCommand(query, currentConnection))
                 {
                     command.CommandTimeout = 300; // 5 minutes timeout
-                    statusLabel.Text = "Checking database integrity...";
+                    enhancedStatusBar.ShowMessage("Checking database integrity...", MessageType.Info);
                     command.ExecuteNonQuery();
                 }
                 MessageBox.Show($"Database integrity check completed for '{dbName}'.", "Check Complete", 
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
-                statusLabel.Text = "Integrity check completed";
+                enhancedStatusBar.ShowMessage("Integrity check completed", MessageType.Success);
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Error checking database integrity: {ex.Message}", "Check Error", 
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
-                statusLabel.Text = "Integrity check failed";
+                enhancedStatusBar.ShowMessage("Integrity check failed", MessageType.Error);
             }
         }
 
@@ -1365,7 +1430,7 @@ namespace SqlServerManager
                     
                     if (dialog.ShowDialog() == DialogResult.OK)
                     {
-                        statusLabel.Text = "Export completed successfully";
+                        enhancedStatusBar.ShowMessage("Export completed successfully", MessageType.Success);
                     }
                 }
             }
@@ -1830,7 +1895,7 @@ namespace SqlServerManager
                     
                     if (exportDialog.ShowDialog() == DialogResult.OK)
                     {
-                        statusLabel.Text = "Export completed successfully";
+                        enhancedStatusBar.ShowMessage("Export completed successfully", MessageType.Success);
                     }
                 }
             }
@@ -1862,7 +1927,7 @@ namespace SqlServerManager
                     
                     if (importDialog.ShowDialog() == DialogResult.OK)
                     {
-                        statusLabel.Text = "Import completed successfully";
+                        enhancedStatusBar.ShowMessage("Import completed successfully", MessageType.Success);
                         // Optionally refresh the table data view if it's currently open
                     }
                 }
@@ -1900,6 +1965,154 @@ namespace SqlServerManager
                 MessageBox.Show($"Error opening script generator: {ex.Message}", "Error", 
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+        
+        private void ShowDataImportWizard_Click(object sender, EventArgs e)
+        {
+            if (currentConnection == null || currentConnection.State != ConnectionState.Open)
+            {
+                MessageBox.Show("Please connect to a SQL Server instance first.", "No Connection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            if (string.IsNullOrEmpty(currentDatabaseName))
+            {
+                MessageBox.Show("Please select a database first.", "No Database Selected", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            try
+            {
+                using (var importDialog = new UI.DataImportExportDialog(currentConnection, currentDatabaseName, null, null, UI.DataImportExportDialog.OperationType.Import))
+                {
+                    ThemeManager.ApplyThemeToDialog(importDialog);
+                    FontManager.ApplyFontSize(importDialog, currentFontScale);
+                    
+                    if (importDialog.ShowDialog() == DialogResult.OK)
+                    {
+                        enhancedStatusBar.ShowMessage("Data import completed successfully", MessageType.Success);
+                        
+                        // Refresh the current database view if we have one selected
+                        if (!string.IsNullOrEmpty(currentDatabaseName))
+                        {
+                            LoadTables(currentDatabaseName);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening Data Import Wizard: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+        
+        private void AdvancedSearchMenuItem_Click(object sender, EventArgs e)
+        {
+            if (currentConnection == null || currentConnection.State != ConnectionState.Open)
+            {
+                MessageBox.Show("Please connect to a SQL Server instance first.", "No Connection", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            try
+            {
+                // Create a simple connection service wrapper for current connection
+                var connectionService = new SimpleConnectionService(currentConnection, currentDatabaseName);
+                
+                using (var searchDialog = new UI.AdvancedSearchDialog(connectionService))
+                {
+                    // Apply current theme using the existing ThemeManager
+                    ThemeManager.ApplyThemeToDialog(searchDialog);
+                    FontManager.ApplyFontSize(searchDialog, currentFontScale);
+                    
+                    // Handle search result selections
+                    searchDialog.SearchResultSelected += (s, args) =>
+                    {
+                        var result = args.Result;
+                        
+                        // Navigate to the found object
+                        if (!string.IsNullOrEmpty(result.Database))
+                        {
+                            // Select the database in the list
+                            for (int i = 0; i < databaseListBox.Items.Count; i++)
+                            {
+                                if (databaseListBox.Items[i].ToString().Equals(result.Database, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    databaseListBox.SelectedIndex = i;
+                                    LoadTables(result.Database);
+                                    break;
+                                }
+                            }
+                            
+                            // If it's a table, select it in the tables view
+                            if (!string.IsNullOrEmpty(result.ObjectName) && result.ObjectType == "TABLE")
+                            {
+                                mainTabControl.SelectedTab = tablesTab;
+                                
+                                // Find and select the table
+                                for (int i = 0; i < tablesGridView.Rows.Count; i++)
+                                {
+                                    var row = tablesGridView.Rows[i];
+                                    if (row.Cells["Table Name"].Value?.ToString().Equals(result.ObjectName, StringComparison.OrdinalIgnoreCase) == true &&
+                                        row.Cells["Schema"].Value?.ToString().Equals(result.Schema, StringComparison.OrdinalIgnoreCase) == true)
+                                    {
+                                        tablesGridView.ClearSelection();
+                                        row.Selected = true;
+                                        tablesGridView.FirstDisplayedScrollingRowIndex = i;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        enhancedStatusBar.ShowMessage($"Navigated to search result: {result.Schema}.{result.ObjectName}", MessageType.Info);
+                    };
+                    
+                    searchDialog.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening Advanced Search: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                LoggingService.LogError("Error opening Advanced Search: {Exception}", ex.Message);
+            }
+        }
+    }
+    
+    // Simple wrapper for ConnectionService to work with existing SqlConnection
+    public class SimpleConnectionService
+    {
+        private readonly SqlConnection _connection;
+        private readonly string _currentDatabase;
+        
+        public SimpleConnectionService(SqlConnection connection, string currentDatabase)
+        {
+            _connection = connection ?? throw new ArgumentNullException(nameof(connection));
+            _currentDatabase = currentDatabase;
+        }
+        
+        public bool IsConnected => _connection?.State == ConnectionState.Open;
+        public string CurrentDatabase => _currentDatabase ?? "master";
+        
+        public async Task<T> ExecuteWithConnectionAsync<T>(Func<SqlConnection, CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
+        {
+            if (_connection == null || _connection.State != ConnectionState.Open)
+                throw new InvalidOperationException("No active database connection");
+                
+            return await operation(_connection, cancellationToken);
+        }
+        
+        public async Task ExecuteWithConnectionAsync(Func<SqlConnection, CancellationToken, Task> operation, CancellationToken cancellationToken = default)
+        {
+            if (_connection == null || _connection.State != ConnectionState.Open)
+                throw new InvalidOperationException("No active database connection");
+                
+            await operation(_connection, cancellationToken);
         }
     }
 }

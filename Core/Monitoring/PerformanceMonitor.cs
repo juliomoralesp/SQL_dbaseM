@@ -18,7 +18,6 @@ namespace SqlServerManager.Core.Monitoring
         private DataGridView alertsGrid;
         private Timer refreshTimer;
         private Label statusLabel;
-        private Panel alertPanel;
         
         // Chart data series
         private ChartValues<double> cpuValues;

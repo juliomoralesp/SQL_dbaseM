@@ -33,6 +33,14 @@ namespace SqlServerManager
                 Application.ThreadException += Application_ThreadException;
                 AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
                 
+                // Test form for Phase 1 components (commented out after successful testing)
+                /*LoggingService.LogInformation("Creating and starting Test Form for Phase 1 components");
+                using (var testForm = new TestPhase1Components())
+                {
+                    Application.Run(testForm);
+                }*/
+                
+                // Run the regular MainForm
                 LoggingService.LogInformation("Creating and starting MainForm");
                 using (var mainForm = new MainForm())
                 {

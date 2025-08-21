@@ -22,11 +22,26 @@ namespace SqlServerManager.UI
             Export
         }
 
+        public enum DialogMode
+        {
+            DatabaseLevel,  // Import/Export to any table in database
+            TableLevel,     // Import/Export to specific table
+            Wizard          // Full wizard with guidance
+        }
+
+        #region Private Fields
         private SqlConnection connection;
         private string databaseName;
         private string schemaName;
         private string tableName;
         private OperationType operation;
+        private DialogMode mode;
+        
+        // UI Controls
+        private TabControl mainTabControl;
+        private TabPage fileSettingsTab;
+        private TabPage advancedOptionsTab;
+        private TabPage previewTab;
         
         private ComboBox formatComboBox;
         private TextBox filePathTextBox;
@@ -39,205 +54,97 @@ namespace SqlServerManager.UI
         private Button cancelButton;
         private ProgressBar progressBar;
         private Label statusLabel;
-        private CheckBox overwriteDataCheckBox;
-        private NumericUpDown batchSizeNumeric;
         private Panel optionsPanel;
+        private ComboBox targetTableComboBox;
+        private Label targetTableLabel;
+        private TextBox tableSearchTextBox;
+        private CheckBox truncateTableCheckBox;
+        private CheckBox skipErrorsCheckBox;
+        private NumericUpDown batchSizeNumeric;
+        private CheckBox validateDataCheckBox;
+        private Label rowCountLabel;
+        private Label estimatedTimeLabel;
+        #endregion
 
-        public DataImportExportDialog(SqlConnection connection, string databaseName, string schemaName, string tableName, OperationType operation)
+        #region Constructors
+        // Main constructor with all parameters
+        public DataImportExportDialog(SqlConnection connection, string databaseName, string schemaName, string tableName, OperationType operation, DialogMode mode = DialogMode.TableLevel)
+        {
+            Initialize(connection, databaseName, schemaName, tableName, operation, mode);
+        }
+
+        // Database-level constructor (for database context menu)
+        public static DataImportExportDialog CreateDatabaseDialog(SqlConnection connection, string databaseName, OperationType operation)
+        {
+            return new DataImportExportDialog(connection, databaseName, null, null, operation, DialogMode.DatabaseLevel);
+        }
+
+        // Table-level constructor (for table context menu)
+        public static DataImportExportDialog CreateTableDialog(SqlConnection connection, string databaseName, string schemaName, string tableName, OperationType operation)
+        {
+            return new DataImportExportDialog(connection, databaseName, schemaName, tableName, operation, DialogMode.TableLevel);
+        }
+
+        // Wizard constructor (for tools menu)
+        public static DataImportExportDialog CreateWizard(SqlConnection connection, string databaseName, OperationType operation)
+        {
+            return new DataImportExportDialog(connection, databaseName, null, null, operation, DialogMode.Wizard);
+        }
+
+        private void Initialize(SqlConnection connection, string databaseName, string schemaName, string tableName, OperationType operation, DialogMode mode)
         {
             this.connection = connection;
             this.databaseName = databaseName;
             this.schemaName = schemaName;
             this.tableName = tableName;
             this.operation = operation;
+            this.mode = mode;
             
             InitializeComponent();
             SetupForOperation();
         }
+        #endregion
 
         private void InitializeComponent()
         {
-            this.Text = $"{operation} Data - {schemaName}.{tableName}";
-            this.Size = new Size(800, 700);
+            UpdateDialogTitle();
+            this.Size = new Size(900, 750);
             this.StartPosition = FormStartPosition.CenterParent;
-            this.MinimumSize = new Size(600, 400);
+            this.MinimumSize = new Size(700, 500);
 
             var mainLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 4,
+                RowCount = 2,
                 Padding = new Padding(10)
             };
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
 
-            // File selection panel
-            var filePanel = new GroupBox
-            {
-                Text = "File Settings",
-                Height = 180,
-                Dock = DockStyle.Top,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
-            };
-
-            var fileLayout = new TableLayoutPanel
+            // Create tabbed interface
+            mainTabControl = new TabControl
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 3,
-                RowCount = 4,
-                Padding = new Padding(10)
-            };
-
-            // Format selection
-            var formatLabel = new Label { Text = "Format:", AutoSize = true, Font = new Font("Segoe UI", 9) };
-            formatComboBox = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Width = 150,
                 Font = new Font("Segoe UI", 9)
             };
-            formatComboBox.Items.AddRange(new[] { "CSV", "Excel (.xlsx)", "JSON", "XML", "SQL Script" });
-            formatComboBox.SelectedIndex = 0;
-            formatComboBox.SelectedIndexChanged += FormatComboBox_SelectedIndexChanged;
 
-            // File path
-            var fileLabel = new Label { Text = "File Path:", AutoSize = true, Font = new Font("Segoe UI", 9) };
-            filePathTextBox = new TextBox { Width = 300, Font = new Font("Segoe UI", 9) };
-            browseButton = new Button 
-            { 
-                Text = "Browse...", 
-                Width = 80,
-                Height = 35,
-                Font = new Font("Segoe UI", 9)
-            };
-            browseButton.Click += BrowseButton_Click;
-
-            // Encoding
-            var encodingLabel = new Label { Text = "Encoding:", AutoSize = true, Font = new Font("Segoe UI", 9) };
-            encodingComboBox = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Width = 150,
-                Font = new Font("Segoe UI", 9)
-            };
-            encodingComboBox.Items.AddRange(new[] { "UTF-8", "UTF-16", "ASCII", "Windows-1252" });
-            encodingComboBox.SelectedIndex = 0;
-
-            // Delimiter (for CSV)
-            var delimiterLabel = new Label { Text = "Delimiter:", AutoSize = true, Font = new Font("Segoe UI", 9) };
-            delimiterComboBox = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Width = 100,
-                Font = new Font("Segoe UI", 9)
-            };
-            delimiterComboBox.Items.AddRange(new[] { ",", ";", "\\t", "|" });
-            delimiterComboBox.SelectedIndex = 0;
-
-            fileLayout.Controls.Add(formatLabel, 0, 0);
-            fileLayout.Controls.Add(formatComboBox, 1, 0);
-            fileLayout.Controls.Add(new Label(), 2, 0);
-
-            fileLayout.Controls.Add(fileLabel, 0, 1);
-            fileLayout.Controls.Add(filePathTextBox, 1, 1);
-            fileLayout.Controls.Add(browseButton, 2, 1);
-
-            fileLayout.Controls.Add(encodingLabel, 0, 2);
-            fileLayout.Controls.Add(encodingComboBox, 1, 2);
-            fileLayout.Controls.Add(new Label(), 2, 2);
-
-            fileLayout.Controls.Add(delimiterLabel, 0, 3);
-            fileLayout.Controls.Add(delimiterComboBox, 1, 3);
-            fileLayout.Controls.Add(new Label(), 2, 3);
-
-            filePanel.Controls.Add(fileLayout);
-
-            // Options panel
-            optionsPanel = new Panel
-            {
-                Height = 100,
-                Dock = DockStyle.Top
-            };
-
-            var optionsLayout = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = true,
-                Padding = new Padding(10)
-            };
-
-            includeHeadersCheckBox = new CheckBox
-            {
-                Text = "Include Headers",
-                Checked = true,
-                AutoSize = true,
-                Margin = new Padding(0, 0, 20, 0)
-            };
-
-            overwriteDataCheckBox = new CheckBox
-            {
-                Text = "Overwrite Existing Data",
-                Checked = false,
-                AutoSize = true,
-                Margin = new Padding(0, 0, 20, 0)
-            };
-
-            var batchLabel = new Label
-            {
-                Text = "Batch Size:",
-                AutoSize = true,
-                Margin = new Padding(0, 3, 5, 0)
-            };
-
-            batchSizeNumeric = new NumericUpDown
-            {
-                Minimum = 100,
-                Maximum = 10000,
-                Value = 1000,
-                Width = 80,
-                Margin = new Padding(0, 0, 20, 0)
-            };
-
-            optionsLayout.Controls.AddRange(new Control[] 
-            { 
-                includeHeadersCheckBox, 
-                overwriteDataCheckBox,
-                batchLabel,
-                batchSizeNumeric
-            });
-
-            optionsPanel.Controls.Add(optionsLayout);
-
-            // Preview panel
-            var previewPanel = new GroupBox
-            {
-                Text = "Data Preview",
-                Dock = DockStyle.Fill
-            };
-
-            previewGridView = new DataGridView
-            {
-                Dock = DockStyle.Fill,
-                ReadOnly = true,
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                MultiSelect = false
-            };
-
-            previewPanel.Controls.Add(previewGridView);
+            // Create tabs
+            CreateFileSettingsTab();
+            CreateAdvancedOptionsTab();
+            CreatePreviewTab();
 
             // Status and buttons panel
             var bottomPanel = new Panel
             {
                 Height = 80,
-                Dock = DockStyle.Bottom
+                Dock = DockStyle.Fill
             };
 
             progressBar = new ProgressBar
             {
                 Location = new Point(10, 10),
-                Size = new Size(300, 20),
+                Size = new Size(350, 20),
                 Style = ProgressBarStyle.Continuous,
                 Visible = false
             };
@@ -245,65 +152,463 @@ namespace SqlServerManager.UI
             statusLabel = new Label
             {
                 Location = new Point(10, 35),
-                Size = new Size(400, 20),
-                Text = "Ready"
+                Size = new Size(500, 20),
+                Text = "Ready",
+                Font = new Font("Segoe UI", 9)
+            };
+
+            rowCountLabel = new Label
+            {
+                Location = new Point(10, 55),
+                Size = new Size(200, 15),
+                Text = "",
+                Font = new Font("Segoe UI", 8),
+                ForeColor = Color.Gray
             };
 
             executeButton = new Button
             {
                 Text = operation == OperationType.Import ? "Import Data" : "Export Data",
-                Size = new Size(100, 30),
-                Location = new Point(520, 25),
+                Size = new Size(120, 35),
+                Location = new Point(600, 25),
                 BackColor = Color.FromArgb(0, 120, 215),
                 ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
             };
             executeButton.Click += ExecuteButton_Click;
 
             cancelButton = new Button
             {
                 Text = "Cancel",
-                Size = new Size(80, 30),
-                Location = new Point(630, 25),
-                DialogResult = DialogResult.Cancel
+                Size = new Size(80, 35),
+                Location = new Point(730, 25),
+                DialogResult = DialogResult.Cancel,
+                Font = new Font("Segoe UI", 9)
             };
 
             bottomPanel.Controls.AddRange(new Control[] 
             { 
                 progressBar, 
-                statusLabel, 
+                statusLabel,
+                rowCountLabel,
                 executeButton, 
                 cancelButton 
             });
 
-            // Add panels to main layout
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 180));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 110));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
-
-            mainLayout.Controls.Add(filePanel, 0, 0);
-            mainLayout.Controls.Add(optionsPanel, 0, 1);
-            mainLayout.Controls.Add(previewPanel, 0, 2);
-            mainLayout.Controls.Add(bottomPanel, 0, 3);
-
+            mainLayout.Controls.Add(mainTabControl, 0, 0);
+            mainLayout.Controls.Add(bottomPanel, 0, 1);
             this.Controls.Add(mainLayout);
+        }
+
+        private void UpdateDialogTitle()
+        {
+            var modeText = mode switch
+            {
+                DialogMode.Wizard => "Wizard",
+                DialogMode.DatabaseLevel => "Database",
+                DialogMode.TableLevel => "Table",
+                _ => ""
+            };
+            
+            var tableText = !string.IsNullOrEmpty(schemaName) && !string.IsNullOrEmpty(tableName) 
+                ? $" - {schemaName}.{tableName}"
+                : !string.IsNullOrEmpty(databaseName) ? $" - {databaseName}" : "";
+                
+            this.Text = $"{operation} Data {modeText}{tableText}";
+        }
+
+        private void CreateFileSettingsTab()
+        {
+            fileSettingsTab = new TabPage("File & Format")
+            {
+                UseVisualStyleBackColor = true
+            };
+
+            var mainPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(15) };
+            
+            // File Format Section
+            var formatGroup = new GroupBox
+            {
+                Text = "File Format",
+                Height = 120,
+                Dock = DockStyle.Top,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Padding = new Padding(10)
+            };
+
+            var formatLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 2,
+                Padding = new Padding(10)
+            };
+            formatLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            formatLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
+            formatLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+
+            var formatLabel = new Label { Text = "Format:", AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font("Segoe UI", 9) };
+            formatComboBox = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 9)
+            };
+            formatComboBox.Items.AddRange(new[] { "CSV", "Excel (.xlsx)", "JSON", "XML", "SQL Script" });
+            formatComboBox.SelectedIndex = 0;
+            formatComboBox.SelectedIndexChanged += FormatComboBox_SelectedIndexChanged;
+
+            var encodingLabel = new Label { Text = "Encoding:", AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font("Segoe UI", 9) };
+            encodingComboBox = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 9)
+            };
+            encodingComboBox.Items.AddRange(new[] { "UTF-8", "UTF-16", "ASCII", "Windows-1252" });
+            encodingComboBox.SelectedIndex = 0;
+
+            formatLayout.Controls.Add(formatLabel, 0, 0);
+            formatLayout.Controls.Add(formatComboBox, 1, 0);
+            formatLayout.Controls.Add(encodingLabel, 0, 1);
+            formatLayout.Controls.Add(encodingComboBox, 1, 1);
+            formatGroup.Controls.Add(formatLayout);
+
+            // File Path Section
+            var fileGroup = new GroupBox
+            {
+                Text = "File Location",
+                Height = 80,
+                Dock = DockStyle.Top,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Padding = new Padding(10)
+            };
+
+            var fileLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 1,
+                Padding = new Padding(10)
+            };
+            fileLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            fileLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 80));
+            fileLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+
+            var fileLabel = new Label { Text = "File Path:", AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font("Segoe UI", 9) };
+            filePathTextBox = new TextBox { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 9) };
+            browseButton = new Button 
+            { 
+                Text = "Browse...", 
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 9)
+            };
+            browseButton.Click += BrowseButton_Click;
+
+            fileLayout.Controls.Add(fileLabel, 0, 0);
+            fileLayout.Controls.Add(filePathTextBox, 1, 0);
+            fileLayout.Controls.Add(browseButton, 2, 0);
+            fileGroup.Controls.Add(fileLayout);
+
+            // Target Table Section
+            var tableGroup = new GroupBox
+            {
+                Text = operation == OperationType.Import ? "Target Table" : "Source Table",
+                Height = 120,
+                Dock = DockStyle.Top,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Padding = new Padding(10)
+            };
+
+            var tableLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 2,
+                Padding = new Padding(10)
+            };
+            tableLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            tableLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+            targetTableLabel = new Label { Text = "Select Table:", AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font("Segoe UI", 9) };
+            
+            var tableSelectionPanel = new Panel { Dock = DockStyle.Fill };
+            targetTableComboBox = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Dock = DockStyle.Top,
+                Font = new Font("Segoe UI", 9),
+                Height = 25
+            };
+            targetTableComboBox.SelectedIndexChanged += TargetTableComboBox_SelectedIndexChanged;
+            
+            tableSearchTextBox = new TextBox
+            {
+                PlaceholderText = "Search tables...",
+                Dock = DockStyle.Bottom,
+                Font = new Font("Segoe UI", 8),
+                Height = 22
+            };
+            tableSearchTextBox.TextChanged += TableSearchTextBox_TextChanged;
+            
+            tableSelectionPanel.Controls.Add(targetTableComboBox);
+            tableSelectionPanel.Controls.Add(tableSearchTextBox);
+
+            tableLayout.Controls.Add(targetTableLabel, 0, 0);
+            tableLayout.Controls.Add(tableSelectionPanel, 1, 0);
+            tableGroup.Controls.Add(tableLayout);
+
+            mainPanel.Controls.Add(tableGroup);
+            mainPanel.Controls.Add(new Splitter { Dock = DockStyle.Top, Height = 5 });
+            mainPanel.Controls.Add(fileGroup);
+            mainPanel.Controls.Add(new Splitter { Dock = DockStyle.Top, Height = 5 });
+            mainPanel.Controls.Add(formatGroup);
+            
+            fileSettingsTab.Controls.Add(mainPanel);
+            mainTabControl.TabPages.Add(fileSettingsTab);
+        }
+
+        private void CreateAdvancedOptionsTab()
+        {
+            advancedOptionsTab = new TabPage("Advanced Options")
+            {
+                UseVisualStyleBackColor = true
+            };
+
+            var mainPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(15) };
+            
+            // CSV-specific options
+            var csvGroup = new GroupBox
+            {
+                Text = "CSV Options",
+                Height = 120,
+                Dock = DockStyle.Top,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Padding = new Padding(10)
+            };
+
+            var csvLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 2,
+                Padding = new Padding(10)
+            };
+            csvLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            csvLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+            var delimiterLabel = new Label { Text = "Delimiter:", AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font("Segoe UI", 9) };
+            delimiterComboBox = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 9)
+            };
+            delimiterComboBox.Items.AddRange(new[] { ",", ";", "\\t", "|" });
+            delimiterComboBox.SelectedIndex = 0;
+
+            includeHeadersCheckBox = new CheckBox
+            {
+                Text = "Include Headers",
+                Checked = true,
+                AutoSize = true,
+                Font = new Font("Segoe UI", 9)
+            };
+
+            csvLayout.Controls.Add(delimiterLabel, 0, 0);
+            csvLayout.Controls.Add(delimiterComboBox, 1, 0);
+            csvLayout.Controls.Add(includeHeadersCheckBox, 0, 1);
+            csvGroup.Controls.Add(csvLayout);
+
+            // Import-specific options
+            if (operation == OperationType.Import)
+            {
+                var importGroup = new GroupBox
+                {
+                    Text = "Import Options",
+                    Height = 150,
+                    Dock = DockStyle.Top,
+                    Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                    Padding = new Padding(10)
+                };
+
+                var importLayout = new TableLayoutPanel
+                {
+                    Dock = DockStyle.Fill,
+                    ColumnCount = 2,
+                    RowCount = 4,
+                    Padding = new Padding(10)
+                };
+                importLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                importLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+                truncateTableCheckBox = new CheckBox
+                {
+                    Text = "Truncate table before import",
+                    AutoSize = true,
+                    Font = new Font("Segoe UI", 9)
+                };
+
+                skipErrorsCheckBox = new CheckBox
+                {
+                    Text = "Skip rows with errors",
+                    Checked = true,
+                    AutoSize = true,
+                    Font = new Font("Segoe UI", 9)
+                };
+
+                validateDataCheckBox = new CheckBox
+                {
+                    Text = "Validate data before import",
+                    Checked = true,
+                    AutoSize = true,
+                    Font = new Font("Segoe UI", 9)
+                };
+
+                var batchLabel = new Label { Text = "Batch Size:", AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font("Segoe UI", 9) };
+                batchSizeNumeric = new NumericUpDown
+                {
+                    Minimum = 100,
+                    Maximum = 10000,
+                    Value = 1000,
+                    Increment = 100,
+                    Width = 100,
+                    Font = new Font("Segoe UI", 9)
+                };
+
+                importLayout.Controls.Add(truncateTableCheckBox, 0, 0);
+                importLayout.Controls.Add(skipErrorsCheckBox, 0, 1);
+                importLayout.Controls.Add(validateDataCheckBox, 0, 2);
+                importLayout.Controls.Add(batchLabel, 0, 3);
+                importLayout.Controls.Add(batchSizeNumeric, 1, 3);
+                importGroup.Controls.Add(importLayout);
+                
+                mainPanel.Controls.Add(importGroup);
+                mainPanel.Controls.Add(new Splitter { Dock = DockStyle.Top, Height = 5 });
+            }
+
+            mainPanel.Controls.Add(csvGroup);
+            advancedOptionsTab.Controls.Add(mainPanel);
+            mainTabControl.TabPages.Add(advancedOptionsTab);
+        }
+
+        private void CreatePreviewTab()
+        {
+            previewTab = new TabPage("Preview")
+            {
+                UseVisualStyleBackColor = true
+            };
+
+            var mainPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
+            
+            // Info panel
+            var infoPanel = new Panel
+            {
+                Height = 60,
+                Dock = DockStyle.Top
+            };
+
+            var infoLabel = new Label
+            {
+                Text = operation == OperationType.Import 
+                    ? "Preview of data to be imported (showing first 100 rows):"
+                    : "Preview of table data to be exported (showing first 100 rows):",
+                Location = new Point(5, 5),
+                AutoSize = true,
+                Font = new Font("Segoe UI", 9)
+            };
+
+            rowCountLabel = new Label
+            {
+                Location = new Point(5, 25),
+                AutoSize = true,
+                Font = new Font("Segoe UI", 8),
+                ForeColor = Color.Gray
+            };
+
+            estimatedTimeLabel = new Label
+            {
+                Location = new Point(5, 40),
+                AutoSize = true,
+                Font = new Font("Segoe UI", 8),
+                ForeColor = Color.Gray
+            };
+
+            infoPanel.Controls.AddRange(new Control[] { infoLabel, rowCountLabel, estimatedTimeLabel });
+
+            // Preview grid
+            previewGridView = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.DisplayedCells,
+                Font = new Font("Segoe UI", 8)
+            };
+
+            mainPanel.Controls.Add(previewGridView);
+            mainPanel.Controls.Add(infoPanel);
+            
+            previewTab.Controls.Add(mainPanel);
+            mainTabControl.TabPages.Add(previewTab);
+        }
+
+        private void TableSearchTextBox_TextChanged(object sender, EventArgs e)
+        {
+            FilterTableList();
+        }
+
+        private void FilterTableList()
+        {
+            if (targetTableComboBox == null || tableSearchTextBox == null)
+                return;
+
+            var searchText = tableSearchTextBox.Text.ToLower();
+            var selectedItem = targetTableComboBox.SelectedItem?.ToString();
+            
+            targetTableComboBox.Items.Clear();
+
+            var allTables = GetAllAvailableTables();
+            var filteredTables = string.IsNullOrWhiteSpace(searchText) 
+                ? allTables 
+                : allTables.Where(t => t.ToLower().Contains(searchText)).ToList();
+
+            foreach (var table in filteredTables)
+            {
+                targetTableComboBox.Items.Add(table);
+            }
+
+            // Try to restore selection
+            if (!string.IsNullOrEmpty(selectedItem) && targetTableComboBox.Items.Contains(selectedItem))
+            {
+                targetTableComboBox.SelectedItem = selectedItem;
+            }
+            else if (targetTableComboBox.Items.Count > 0)
+            {
+                targetTableComboBox.SelectedIndex = 0;
+            }
+        }
+
+        private List<string> allTablesList = new List<string>();
+
+        private List<string> GetAllAvailableTables()
+        {
+            return allTablesList;
         }
 
         private void SetupForOperation()
         {
-            if (operation == OperationType.Export)
+            LoadAvailableTables();
+            UpdateDialogTitle();
+            
+            // Set default tab based on mode
+            if (mode == DialogMode.Wizard)
             {
-                overwriteDataCheckBox.Visible = false;
-                overwriteDataCheckBox.Checked = false;
-                
-                // Load table data for preview
-                LoadTableDataPreview();
-            }
-            else
-            {
-                // For import, we'll load preview when file is selected
-                previewGridView.DataSource = null;
+                mainTabControl.SelectedTab = fileSettingsTab;
             }
         }
 
@@ -344,21 +649,7 @@ namespace SqlServerManager.UI
             var extension = GetFileExtension(selectedFormat);
             var filter = GetFileFilter(selectedFormat);
 
-            if (operation == OperationType.Import)
-            {
-                using (var openDialog = new OpenFileDialog())
-                {
-                    openDialog.Filter = filter;
-                    openDialog.Title = "Select file to import";
-                    
-                    if (openDialog.ShowDialog() == DialogResult.OK)
-                    {
-                        filePathTextBox.Text = openDialog.FileName;
-                        LoadFilePreview();
-                    }
-                }
-            }
-            else
+            if (operation == OperationType.Export)
             {
                 using (var saveDialog = new SaveFileDialog())
                 {
@@ -369,6 +660,20 @@ namespace SqlServerManager.UI
                     if (saveDialog.ShowDialog() == DialogResult.OK)
                     {
                         filePathTextBox.Text = saveDialog.FileName;
+                    }
+                }
+            }
+            else // Import operation
+            {
+                using (var openDialog = new OpenFileDialog())
+                {
+                    openDialog.Filter = filter;
+                    openDialog.Title = "Select file to import";
+                    
+                    if (openDialog.ShowDialog() == DialogResult.OK)
+                    {
+                        filePathTextBox.Text = openDialog.FileName;
+                        LoadFilePreview(openDialog.FileName);
                     }
                 }
             }
@@ -408,229 +713,6 @@ namespace SqlServerManager.UI
             }
         }
 
-        private void LoadFilePreview()
-        {
-            if (string.IsNullOrEmpty(filePathTextBox.Text) || !File.Exists(filePathTextBox.Text))
-                return;
-
-            try
-            {
-                var selectedFormat = formatComboBox.SelectedItem.ToString();
-                DataTable previewData = null;
-
-                switch (selectedFormat)
-                {
-                    case "CSV":
-                        previewData = LoadCsvPreview(filePathTextBox.Text);
-                        break;
-                    case "Excel (.xlsx)":
-                        previewData = LoadExcelPreview(filePathTextBox.Text);
-                        break;
-                    case "JSON":
-                        previewData = LoadJsonPreview(filePathTextBox.Text);
-                        break;
-                    case "XML":
-                        previewData = LoadXmlPreview(filePathTextBox.Text);
-                        break;
-                }
-
-                if (previewData != null)
-                {
-                    previewGridView.DataSource = previewData;
-                    statusLabel.Text = $"Preview loaded: {previewData.Rows.Count} rows";
-                }
-            }
-            catch (Exception ex)
-            {
-                statusLabel.Text = $"Error loading preview: {ex.Message}";
-                MessageBox.Show($"Error loading file preview: {ex.Message}", "Preview Error", 
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        }
-
-        private DataTable LoadCsvPreview(string filePath)
-        {
-            var dataTable = new DataTable();
-            var encoding = GetSelectedEncoding();
-            var delimiter = GetSelectedDelimiter();
-
-            using (var reader = new StreamReader(filePath, encoding))
-            {
-                var lines = new List<string>();
-                for (int i = 0; i < 100 && !reader.EndOfStream; i++)
-                {
-                    lines.Add(reader.ReadLine());
-                }
-
-                if (lines.Count > 0)
-                {
-                    // Parse headers
-                    var headers = lines[0].Split(delimiter);
-                    var startRow = 0;
-
-                    if (includeHeadersCheckBox.Checked)
-                    {
-                        foreach (var header in headers)
-                        {
-                            dataTable.Columns.Add(header.Trim('"'));
-                        }
-                        startRow = 1;
-                    }
-                    else
-                    {
-                        for (int i = 0; i < headers.Length; i++)
-                        {
-                            dataTable.Columns.Add($"Column{i + 1}");
-                        }
-                    }
-
-                    // Parse data rows
-                    for (int i = startRow; i < lines.Count; i++)
-                    {
-                        var values = lines[i].Split(delimiter);
-                        var row = dataTable.NewRow();
-                        
-                        for (int j = 0; j < Math.Min(values.Length, dataTable.Columns.Count); j++)
-                        {
-                            row[j] = values[j].Trim('"');
-                        }
-                        
-                        dataTable.Rows.Add(row);
-                    }
-                }
-            }
-
-            return dataTable;
-        }
-
-        private DataTable LoadExcelPreview(string filePath)
-        {
-            var dataTable = new DataTable();
-            
-            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-            
-            using (var package = new ExcelPackage(new FileInfo(filePath)))
-            {
-                var worksheet = package.Workbook.Worksheets[0]; // First worksheet
-                
-                if (worksheet.Dimension != null)
-                {
-                    var startRow = 1;
-                    var endCol = worksheet.Dimension.End.Column;
-                    var maxPreviewRows = Math.Min(100, worksheet.Dimension.End.Row);
-
-                    // Add columns
-                    if (includeHeadersCheckBox.Checked && worksheet.Dimension.End.Row > 1)
-                    {
-                        for (int col = 1; col <= endCol; col++)
-                        {
-                            var headerValue = worksheet.Cells[1, col].Value?.ToString() ?? $"Column{col}";
-                            dataTable.Columns.Add(headerValue);
-                        }
-                        startRow = 2;
-                    }
-                    else
-                    {
-                        for (int col = 1; col <= endCol; col++)
-                        {
-                            dataTable.Columns.Add($"Column{col}");
-                        }
-                    }
-
-                    // Add rows
-                    for (int row = startRow; row <= maxPreviewRows; row++)
-                    {
-                        var dataRow = dataTable.NewRow();
-                        for (int col = 1; col <= endCol; col++)
-                        {
-                            dataRow[col - 1] = worksheet.Cells[row, col].Value?.ToString() ?? "";
-                        }
-                        dataTable.Rows.Add(dataRow);
-                    }
-                }
-            }
-
-            return dataTable;
-        }
-
-        private DataTable LoadJsonPreview(string filePath)
-        {
-            var dataTable = new DataTable();
-            var encoding = GetSelectedEncoding();
-
-            var jsonText = File.ReadAllText(filePath, encoding);
-            var jsonArray = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(jsonText);
-
-            if (jsonArray?.Count > 0)
-            {
-                // Add columns based on first object
-                foreach (var key in jsonArray[0].Keys)
-                {
-                    dataTable.Columns.Add(key);
-                }
-
-                // Add rows (limit to 100 for preview)
-                var previewCount = Math.Min(100, jsonArray.Count);
-                for (int i = 0; i < previewCount; i++)
-                {
-                    var row = dataTable.NewRow();
-                    foreach (var kvp in jsonArray[i])
-                    {
-                        if (dataTable.Columns.Contains(kvp.Key))
-                        {
-                            row[kvp.Key] = kvp.Value?.ToString() ?? "";
-                        }
-                    }
-                    dataTable.Rows.Add(row);
-                }
-            }
-
-            return dataTable;
-        }
-
-        private DataTable LoadXmlPreview(string filePath)
-        {
-            var dataTable = new DataTable();
-            var doc = new XmlDocument();
-            doc.Load(filePath);
-
-            var nodes = doc.SelectNodes("//row") ?? doc.DocumentElement?.ChildNodes;
-            if (nodes?.Count > 0)
-            {
-                // Add columns based on first node
-                var firstNode = nodes[0];
-                if (firstNode is XmlElement firstElement)
-                {
-                    foreach (XmlNode child in firstElement.ChildNodes)
-                    {
-                        if (child is XmlElement)
-                        {
-                            dataTable.Columns.Add(child.Name);
-                        }
-                    }
-
-                    // Add rows (limit to 100 for preview)
-                    var previewCount = Math.Min(100, nodes.Count);
-                    for (int i = 0; i < previewCount; i++)
-                    {
-                        if (nodes[i] is XmlElement element)
-                        {
-                            var row = dataTable.NewRow();
-                            foreach (XmlNode child in element.ChildNodes)
-                            {
-                                if (child is XmlElement childElement && dataTable.Columns.Contains(childElement.Name))
-                                {
-                                    row[childElement.Name] = childElement.InnerText;
-                                }
-                            }
-                            dataTable.Rows.Add(row);
-                        }
-                    }
-                }
-            }
-
-            return dataTable;
-        }
 
         private Encoding GetSelectedEncoding()
         {
@@ -656,54 +738,207 @@ namespace SqlServerManager.UI
             };
         }
 
-        private async void ExecuteButton_Click(object sender, EventArgs e)
-        {
-            if (string.IsNullOrEmpty(filePathTextBox.Text))
-            {
-                MessageBox.Show("Please select a file path.", "File Required", 
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
 
+
+
+        private void LoadFilePreview(string filePath)
+        {
             try
             {
-                executeButton.Enabled = false;
-                cancelButton.Text = "Cancel";
-                progressBar.Visible = true;
-                progressBar.Style = ProgressBarStyle.Marquee;
-
-                if (operation == OperationType.Import)
+                var selectedFormat = formatComboBox.SelectedItem.ToString();
+                DataTable previewData = null;
+                
+                switch (selectedFormat)
                 {
-                    await ImportData();
+                    case "CSV":
+                        previewData = LoadCsvPreview(filePath);
+                        break;
+                    case "Excel (.xlsx)":
+                        previewData = LoadExcelPreview(filePath);
+                        break;
+                    case "JSON":
+                        previewData = LoadJsonPreview(filePath);
+                        break;
+                    case "XML":
+                        previewData = LoadXmlPreview(filePath);
+                        break;
+                    default:
+                        statusLabel.Text = $"Preview not supported for {selectedFormat} format";
+                        return;
                 }
-                else
+                
+                if (previewData != null)
                 {
-                    await ExportData();
+                    previewGridView.DataSource = previewData;
+                    statusLabel.Text = $"File preview loaded: {previewData.Rows.Count} rows";
                 }
-
-                this.DialogResult = DialogResult.OK;
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Operation failed: {ex.Message}", "Error", 
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                executeButton.Enabled = true;
-                progressBar.Visible = false;
-                progressBar.Style = ProgressBarStyle.Continuous;
+                statusLabel.Text = $"Error loading file preview: {ex.Message}";
+                MessageBox.Show($"Error loading file preview: {ex.Message}", "Preview Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
-
+        
+        private DataTable LoadCsvPreview(string filePath)
+        {
+            var dataTable = new DataTable();
+            var encoding = GetSelectedEncoding();
+            var delimiter = GetSelectedDelimiter();
+            
+            using (var reader = new StreamReader(filePath, encoding))
+            {
+                var firstLine = true;
+                var rowCount = 0;
+                
+                while (!reader.EndOfStream && rowCount < 100) // Limit preview to 100 rows
+                {
+                    var line = reader.ReadLine();
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    
+                    var values = line.Split(delimiter);
+                    
+                    if (firstLine)
+                    {
+                        // Create columns
+                        for (int i = 0; i < values.Length; i++)
+                        {
+                            var columnName = includeHeadersCheckBox.Checked ? values[i].Trim('"') : $"Column{i + 1}";
+                            dataTable.Columns.Add(columnName);
+                        }
+                        
+                        firstLine = false;
+                        if (includeHeadersCheckBox.Checked) continue; // Skip header row for data
+                    }
+                    
+                    // Add data row
+                    var dataRow = dataTable.NewRow();
+                    for (int i = 0; i < Math.Min(values.Length, dataTable.Columns.Count); i++)
+                    {
+                        dataRow[i] = values[i].Trim('"');
+                    }
+                    dataTable.Rows.Add(dataRow);
+                    rowCount++;
+                }
+            }
+            
+            return dataTable;
+        }
+        
+        private DataTable LoadExcelPreview(string filePath)
+        {
+            var dataTable = new DataTable();
+            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+            
+            using (var package = new ExcelPackage(new FileInfo(filePath)))
+            {
+                var worksheet = package.Workbook.Worksheets[0]; // First worksheet
+                var startRow = includeHeadersCheckBox.Checked ? 1 : 0;
+                var endRow = Math.Min(worksheet.Dimension?.End.Row ?? 0, startRow + 100); // Limit to 100 rows
+                var endCol = worksheet.Dimension?.End.Column ?? 0;
+                
+                // Create columns
+                for (int col = 1; col <= endCol; col++)
+                {
+                    var columnName = includeHeadersCheckBox.Checked ? 
+                        worksheet.Cells[1, col].Value?.ToString() ?? $"Column{col}" :
+                        $"Column{col}";
+                    dataTable.Columns.Add(columnName);
+                }
+                
+                // Add data rows
+                var dataStartRow = includeHeadersCheckBox.Checked ? 2 : 1;
+                for (int row = dataStartRow; row <= endRow; row++)
+                {
+                    var dataRow = dataTable.NewRow();
+                    for (int col = 1; col <= endCol; col++)
+                    {
+                        dataRow[col - 1] = worksheet.Cells[row, col].Value?.ToString() ?? "";
+                    }
+                    dataTable.Rows.Add(dataRow);
+                }
+            }
+            
+            return dataTable;
+        }
+        
+        private DataTable LoadJsonPreview(string filePath)
+        {
+            var dataTable = new DataTable();
+            var encoding = GetSelectedEncoding();
+            var jsonText = File.ReadAllText(filePath, encoding);
+            
+            var jsonArray = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(jsonText);
+            
+            if (jsonArray != null && jsonArray.Count > 0)
+            {
+                // Create columns from first object
+                foreach (var key in jsonArray[0].Keys)
+                {
+                    dataTable.Columns.Add(key);
+                }
+                
+                // Add data rows (limit to 100 for preview)
+                var rowCount = Math.Min(jsonArray.Count, 100);
+                for (int i = 0; i < rowCount; i++)
+                {
+                    var dataRow = dataTable.NewRow();
+                    foreach (var key in jsonArray[i].Keys)
+                    {
+                        dataRow[key] = jsonArray[i][key]?.ToString() ?? "";
+                    }
+                    dataTable.Rows.Add(dataRow);
+                }
+            }
+            
+            return dataTable;
+        }
+        
+        private DataTable LoadXmlPreview(string filePath)
+        {
+            var dataTable = new DataTable();
+            var doc = new XmlDocument();
+            doc.Load(filePath);
+            
+            var rootNode = doc.DocumentElement;
+            if (rootNode?.FirstChild != null)
+            {
+                // Create columns from first data row
+                foreach (XmlNode childNode in rootNode.FirstChild.ChildNodes)
+                {
+                    dataTable.Columns.Add(childNode.Name);
+                }
+                
+                // Add data rows (limit to 100 for preview)
+                var rowCount = 0;
+                foreach (XmlNode rowNode in rootNode.ChildNodes)
+                {
+                    if (rowCount >= 100) break;
+                    
+                    var dataRow = dataTable.NewRow();
+                    foreach (XmlNode cellNode in rowNode.ChildNodes)
+                    {
+                        if (dataTable.Columns.Contains(cellNode.Name))
+                        {
+                            dataRow[cellNode.Name] = cellNode.InnerText;
+                        }
+                    }
+                    dataTable.Rows.Add(dataRow);
+                    rowCount++;
+                }
+            }
+            
+            return dataTable;
+        }
+        
         private async Task ImportData()
         {
             var selectedFormat = formatComboBox.SelectedItem.ToString();
-            var batchSize = (int)batchSizeNumeric.Value;
-
-            statusLabel.Text = "Reading import file...";
-
+            statusLabel.Text = "Loading file data...";
+            
             DataTable importData = null;
+            
             switch (selectedFormat)
             {
                 case "CSV":
@@ -718,43 +953,24 @@ namespace SqlServerManager.UI
                 case "XML":
                     importData = await LoadFullXmlData();
                     break;
+                default:
+                    throw new NotSupportedException($"Import not supported for {selectedFormat} format");
             }
-
+            
             if (importData == null || importData.Rows.Count == 0)
             {
-                statusLabel.Text = "No data to import";
+                statusLabel.Text = "No data found to import";
                 return;
             }
-
+            
             statusLabel.Text = $"Importing {importData.Rows.Count} rows...";
-
-            // Clear existing data if requested
-            if (overwriteDataCheckBox.Checked)
-            {
-                var deleteCommand = new SqlCommand($"DELETE FROM [{schemaName}].[{tableName}]", connection);
-                await deleteCommand.ExecuteNonQueryAsync();
-            }
-
-            // Insert data in batches
-            var totalRows = importData.Rows.Count;
-            var importedRows = 0;
-
-            for (int i = 0; i < totalRows; i += batchSize)
-            {
-                var batchRows = importData.Rows.Cast<DataRow>()
-                    .Skip(i)
-                    .Take(batchSize)
-                    .ToList();
-
-                await InsertBatch(batchRows, importData.Columns);
-                
-                importedRows += batchRows.Count;
-                statusLabel.Text = $"Imported {importedRows}/{totalRows} rows...";
-            }
-
-            statusLabel.Text = $"Import completed: {importedRows} rows imported";
+            
+            // Bulk insert the data
+            await BulkInsertData(importData);
+            
+            statusLabel.Text = $"Import completed: {importData.Rows.Count} rows imported";
         }
-
+        
         private async Task<DataTable> LoadFullCsvData()
         {
             return await Task.Run(() =>
@@ -762,149 +978,118 @@ namespace SqlServerManager.UI
                 var dataTable = new DataTable();
                 var encoding = GetSelectedEncoding();
                 var delimiter = GetSelectedDelimiter();
-
+                
                 using (var reader = new StreamReader(filePathTextBox.Text, encoding))
                 {
-                    var firstLine = reader.ReadLine();
-                    if (firstLine == null) return dataTable;
-
-                    var headers = firstLine.Split(delimiter);
-                    var startFromSecondLine = includeHeadersCheckBox.Checked;
-
-                    // Add columns
-                    if (startFromSecondLine)
+                    var firstLine = true;
+                    
+                    while (!reader.EndOfStream)
                     {
-                        foreach (var header in headers)
-                        {
-                            dataTable.Columns.Add(header.Trim('"'));
-                        }
-                    }
-                    else
-                    {
-                        for (int i = 0; i < headers.Length; i++)
-                        {
-                            dataTable.Columns.Add($"Column{i + 1}");
-                        }
-
-                        // Add first line as data if no headers
-                        var firstRow = dataTable.NewRow();
-                        for (int i = 0; i < Math.Min(headers.Length, dataTable.Columns.Count); i++)
-                        {
-                            firstRow[i] = headers[i].Trim('"');
-                        }
-                        dataTable.Rows.Add(firstRow);
-                    }
-
-                    // Read remaining lines
-                    string line;
-                    while ((line = reader.ReadLine()) != null)
-                    {
+                        var line = reader.ReadLine();
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+                        
                         var values = line.Split(delimiter);
-                        var row = dataTable.NewRow();
-
+                        
+                        if (firstLine)
+                        {
+                            // Create columns
+                            for (int i = 0; i < values.Length; i++)
+                            {
+                                var columnName = includeHeadersCheckBox.Checked ? values[i].Trim('"') : $"Column{i + 1}";
+                                dataTable.Columns.Add(columnName);
+                            }
+                            
+                            firstLine = false;
+                            if (includeHeadersCheckBox.Checked) continue; // Skip header row for data
+                        }
+                        
+                        // Add data row
+                        var dataRow = dataTable.NewRow();
                         for (int i = 0; i < Math.Min(values.Length, dataTable.Columns.Count); i++)
                         {
-                            row[i] = values[i].Trim('"');
+                            dataRow[i] = values[i].Trim('"');
                         }
-
-                        dataTable.Rows.Add(row);
+                        dataTable.Rows.Add(dataRow);
                     }
                 }
-
+                
                 return dataTable;
             });
         }
-
+        
         private async Task<DataTable> LoadFullExcelData()
         {
             return await Task.Run(() =>
             {
                 var dataTable = new DataTable();
-                
                 ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
                 
                 using (var package = new ExcelPackage(new FileInfo(filePathTextBox.Text)))
                 {
-                    var worksheet = package.Workbook.Worksheets[0];
+                    var worksheet = package.Workbook.Worksheets[0]; // First worksheet
+                    var endRow = worksheet.Dimension?.End.Row ?? 0;
+                    var endCol = worksheet.Dimension?.End.Column ?? 0;
                     
-                    if (worksheet.Dimension != null)
+                    // Create columns
+                    for (int col = 1; col <= endCol; col++)
                     {
-                        var startRow = 1;
-                        var endCol = worksheet.Dimension.End.Column;
-                        var endRow = worksheet.Dimension.End.Row;
-
-                        // Add columns
-                        if (includeHeadersCheckBox.Checked && endRow > 1)
+                        var columnName = includeHeadersCheckBox.Checked ? 
+                            worksheet.Cells[1, col].Value?.ToString() ?? $"Column{col}" :
+                            $"Column{col}";
+                        dataTable.Columns.Add(columnName);
+                    }
+                    
+                    // Add data rows
+                    var dataStartRow = includeHeadersCheckBox.Checked ? 2 : 1;
+                    for (int row = dataStartRow; row <= endRow; row++)
+                    {
+                        var dataRow = dataTable.NewRow();
+                        for (int col = 1; col <= endCol; col++)
                         {
-                            for (int col = 1; col <= endCol; col++)
-                            {
-                                var headerValue = worksheet.Cells[1, col].Value?.ToString() ?? $"Column{col}";
-                                dataTable.Columns.Add(headerValue);
-                            }
-                            startRow = 2;
+                            dataRow[col - 1] = worksheet.Cells[row, col].Value?.ToString() ?? "";
                         }
-                        else
-                        {
-                            for (int col = 1; col <= endCol; col++)
-                            {
-                                dataTable.Columns.Add($"Column{col}");
-                            }
-                        }
-
-                        // Add all rows
-                        for (int row = startRow; row <= endRow; row++)
-                        {
-                            var dataRow = dataTable.NewRow();
-                            for (int col = 1; col <= endCol; col++)
-                            {
-                                dataRow[col - 1] = worksheet.Cells[row, col].Value?.ToString() ?? "";
-                            }
-                            dataTable.Rows.Add(dataRow);
-                        }
+                        dataTable.Rows.Add(dataRow);
                     }
                 }
-
+                
                 return dataTable;
             });
         }
-
+        
         private async Task<DataTable> LoadFullJsonData()
         {
             return await Task.Run(() =>
             {
                 var dataTable = new DataTable();
                 var encoding = GetSelectedEncoding();
-
                 var jsonText = File.ReadAllText(filePathTextBox.Text, encoding);
+                
                 var jsonArray = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(jsonText);
-
-                if (jsonArray?.Count > 0)
+                
+                if (jsonArray != null && jsonArray.Count > 0)
                 {
-                    // Add columns
+                    // Create columns from first object
                     foreach (var key in jsonArray[0].Keys)
                     {
                         dataTable.Columns.Add(key);
                     }
-
-                    // Add all rows
+                    
+                    // Add all data rows
                     foreach (var jsonObject in jsonArray)
                     {
-                        var row = dataTable.NewRow();
-                        foreach (var kvp in jsonObject)
+                        var dataRow = dataTable.NewRow();
+                        foreach (var key in jsonObject.Keys)
                         {
-                            if (dataTable.Columns.Contains(kvp.Key))
-                            {
-                                row[kvp.Key] = kvp.Value?.ToString() ?? "";
-                            }
+                            dataRow[key] = jsonObject[key]?.ToString() ?? "";
                         }
-                        dataTable.Rows.Add(row);
+                        dataTable.Rows.Add(dataRow);
                     }
                 }
-
+                
                 return dataTable;
             });
         }
-
+        
         private async Task<DataTable> LoadFullXmlData()
         {
             return await Task.Run(() =>
@@ -912,75 +1097,312 @@ namespace SqlServerManager.UI
                 var dataTable = new DataTable();
                 var doc = new XmlDocument();
                 doc.Load(filePathTextBox.Text);
-
-                var nodes = doc.SelectNodes("//row") ?? doc.DocumentElement?.ChildNodes;
-                if (nodes?.Count > 0)
+                
+                var rootNode = doc.DocumentElement;
+                if (rootNode?.FirstChild != null)
                 {
-                    // Add columns based on first node
-                    var firstNode = nodes[0];
-                    if (firstNode is XmlElement firstElement)
+                    // Create columns from first data row
+                    foreach (XmlNode childNode in rootNode.FirstChild.ChildNodes)
                     {
-                        foreach (XmlNode child in firstElement.ChildNodes)
+                        dataTable.Columns.Add(childNode.Name);
+                    }
+                    
+                    // Add all data rows
+                    foreach (XmlNode rowNode in rootNode.ChildNodes)
+                    {
+                        var dataRow = dataTable.NewRow();
+                        foreach (XmlNode cellNode in rowNode.ChildNodes)
                         {
-                            if (child is XmlElement)
+                            if (dataTable.Columns.Contains(cellNode.Name))
                             {
-                                dataTable.Columns.Add(child.Name);
+                                dataRow[cellNode.Name] = cellNode.InnerText;
                             }
                         }
-
-                        // Add all rows
-                        foreach (XmlNode node in nodes)
-                        {
-                            if (node is XmlElement element)
-                            {
-                                var row = dataTable.NewRow();
-                                foreach (XmlNode child in element.ChildNodes)
-                                {
-                                    if (child is XmlElement childElement && dataTable.Columns.Contains(childElement.Name))
-                                    {
-                                        row[childElement.Name] = childElement.InnerText;
-                                    }
-                                }
-                                dataTable.Rows.Add(row);
-                            }
-                        }
+                        dataTable.Rows.Add(dataRow);
                     }
                 }
-
+                
                 return dataTable;
             });
         }
-
-        private async Task InsertBatch(List<DataRow> batchRows, DataColumnCollection columns)
+        
+        private async Task BulkInsertData(DataTable sourceData)
         {
-            var columnNames = columns.Cast<DataColumn>().Select(c => $"[{c.ColumnName}]").ToArray();
-            var valueParams = columns.Cast<DataColumn>().Select((c, i) => $"@param{i}").ToArray();
+            // Get target table columns with nullability info
+            var targetColumns = await GetTableColumns();
+            var missingRequiredColumns = new List<string>();
             
-            var insertQuery = $@"
-                INSERT INTO [{schemaName}].[{tableName}] 
-                ({string.Join(", ", columnNames)}) 
-                VALUES ({string.Join(", ", valueParams)})";
-
-            using (var command = new SqlCommand(insertQuery, connection))
+            // Create a compatible DataTable for bulk insert
+            var targetDataTable = new DataTable();
+            foreach (var column in targetColumns)
             {
-                // Add parameters for the first row to define parameter types
-                for (int i = 0; i < columns.Count; i++)
+                targetDataTable.Columns.Add(column.Name, column.ClrType);
+            }
+            
+            // Map and convert data
+            foreach (DataRow sourceRow in sourceData.Rows)
+            {
+                var targetRow = targetDataTable.NewRow();
+                
+                foreach (var targetColumn in targetColumns)
                 {
-                    command.Parameters.Add($"@param{i}", SqlDbType.NVarChar);
-                }
-
-                foreach (var row in batchRows)
-                {
-                    for (int i = 0; i < columns.Count; i++)
+                    var columnName = targetColumn.Name;
+                    
+                    // Try to find matching column in source data (case-insensitive)
+                    var sourceColumn = sourceData.Columns.Cast<DataColumn>()
+                        .FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
+                    
+                    if (sourceColumn != null)
                     {
-                        command.Parameters[$"@param{i}"].Value = row[i] ?? DBNull.Value;
+                        var sourceValue = sourceRow[sourceColumn];
+                        targetRow[columnName] = ConvertValue(sourceValue, targetColumn.ClrType, targetColumn.IsNullable, columnName);
                     }
+                    else
+                    {
+                        // Column not found in source data
+                        if (!targetColumn.IsNullable)
+                        {
+                            // Non-nullable column missing from source - provide default value
+                            var defaultValue = GetDefaultValueForType(targetColumn.ClrType);
+                            if (defaultValue == null)
+                            {
+                                missingRequiredColumns.Add(columnName);
+                                targetRow[columnName] = DBNull.Value; // This will cause constraint violation
+                            }
+                            else
+                            {
+                                targetRow[columnName] = defaultValue;
+                            }
+                        }
+                        else
+                        {
+                            // Nullable column - set to null
+                            targetRow[columnName] = DBNull.Value;
+                        }
+                    }
+                }
+                
+                targetDataTable.Rows.Add(targetRow);
+            }
+            
+            // Report missing required columns
+            if (missingRequiredColumns.Count > 0)
+            {
+                var message = $"The following non-nullable columns are missing from the source data and cannot be populated with default values:\n{string.Join(", ", missingRequiredColumns)}\n\nThe import may fail due to constraint violations.";
+                if (!skipErrorsCheckBox.Checked)
+                {
+                    throw new InvalidOperationException(message);
+                }
+                else
+                {
+                    statusLabel.Text = $"Warning: Missing required columns - {missingRequiredColumns.Count} columns";
+                }
+            }
+            
+            // Use SqlBulkCopy for efficient insert
+            using (var bulkCopy = new SqlBulkCopy(connection))
+            {
+                bulkCopy.DestinationTableName = $"[{schemaName}].[{tableName}]";
+                bulkCopy.BatchSize = (int)batchSizeNumeric.Value;
+                bulkCopy.BulkCopyTimeout = 300; // 5 minutes
+                
+                // Map columns
+                foreach (var column in targetColumns)
+                {
+                    bulkCopy.ColumnMappings.Add(column.Name, column.Name);
+                }
+                
+                await bulkCopy.WriteToServerAsync(targetDataTable);
+            }
+        }
+        
+        private class ColumnInfo
+        {
+            public string Name { get; set; }
+            public string SqlType { get; set; }
+            public Type ClrType { get; set; }
+            public bool IsNullable { get; set; }
+        }
 
-                    await command.ExecuteNonQueryAsync();
+        private async Task<List<ColumnInfo>> GetTableColumns()
+        {
+            var columns = new List<ColumnInfo>();
+            
+            var query = @"
+                SELECT 
+                    c.COLUMN_NAME,
+                    c.DATA_TYPE,
+                    c.IS_NULLABLE
+                FROM INFORMATION_SCHEMA.COLUMNS c
+                WHERE c.TABLE_SCHEMA = @schema AND c.TABLE_NAME = @table
+                ORDER BY c.ORDINAL_POSITION";
+            
+            using (var command = new SqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("@schema", schemaName);
+                command.Parameters.AddWithValue("@table", tableName);
+                
+                using (var reader = await command.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        var columnName = reader["COLUMN_NAME"].ToString();
+                        var dataType = reader["DATA_TYPE"].ToString().ToLower();
+                        var isNullable = reader["IS_NULLABLE"].ToString().Equals("YES", StringComparison.OrdinalIgnoreCase);
+                        
+                        var clrType = MapSqlTypeToClrType(dataType);
+                        columns.Add(new ColumnInfo
+                        {
+                            Name = columnName,
+                            SqlType = dataType,
+                            ClrType = clrType,
+                            IsNullable = isNullable
+                        });
+                    }
+                }
+            }
+            
+            return columns;
+        }
+        
+        private Type MapSqlTypeToClrType(string sqlType)
+        {
+            return sqlType.ToLower() switch
+            {
+                "int" or "integer" => typeof(int),
+                "bigint" => typeof(long),
+                "smallint" => typeof(short),
+                "tinyint" => typeof(byte),
+                "bit" => typeof(bool),
+                "decimal" or "numeric" or "money" or "smallmoney" => typeof(decimal),
+                "float" or "real" => typeof(double),
+                "datetime" or "datetime2" or "smalldatetime" or "date" or "time" => typeof(DateTime),
+                "uniqueidentifier" => typeof(Guid),
+                _ => typeof(string) // Default to string for text types
+            };
+        }
+        
+        private object ConvertValue(object sourceValue, Type targetType, bool isNullable, string columnName)
+        {
+            if (sourceValue == null || sourceValue == DBNull.Value)
+            {
+                if (isNullable)
+                {
+                    return DBNull.Value;
+                }
+                else
+                {
+                    // Non-nullable column with null value - provide default
+                    var defaultValue = GetDefaultValueForType(targetType);
+                    return defaultValue ?? DBNull.Value;
+                }
+            }
+            
+            var sourceString = sourceValue.ToString();
+            if (string.IsNullOrWhiteSpace(sourceString))
+            {
+                if (isNullable)
+                {
+                    return DBNull.Value;
+                }
+                else
+                {
+                    // Non-nullable column with empty value - provide default
+                    var defaultValue = GetDefaultValueForType(targetType);
+                    return defaultValue ?? DBNull.Value;
+                }
+            }
+            
+            try
+            {
+                if (targetType == typeof(int))
+                    return int.Parse(sourceString);
+                else if (targetType == typeof(long))
+                    return long.Parse(sourceString);
+                else if (targetType == typeof(short))
+                    return short.Parse(sourceString);
+                else if (targetType == typeof(byte))
+                    return byte.Parse(sourceString);
+                else if (targetType == typeof(bool))
+                {
+                    if (sourceString.Equals("true", StringComparison.OrdinalIgnoreCase) || sourceString == "1")
+                        return true;
+                    if (sourceString.Equals("false", StringComparison.OrdinalIgnoreCase) || sourceString == "0")
+                        return false;
+                    return bool.Parse(sourceString);
+                }
+                else if (targetType == typeof(decimal))
+                    return decimal.Parse(sourceString);
+                else if (targetType == typeof(double))
+                    return double.Parse(sourceString);
+                else if (targetType == typeof(DateTime))
+                    return DateTime.Parse(sourceString);
+                else if (targetType == typeof(Guid))
+                    return Guid.Parse(sourceString);
+                else
+                    return sourceString; // String type
+            }
+            catch
+            {
+                // Conversion failed - use appropriate fallback based on nullability
+                if (isNullable)
+                {
+                    return DBNull.Value;
+                }
+                else
+                {
+                    var defaultValue = GetDefaultValueForType(targetType);
+                    if (defaultValue != null)
+                    {
+                        return defaultValue;
+                    }
+                    else
+                    {
+                        // Log the conversion error for debugging
+                        statusLabel.Text = $"Warning: Failed to convert '{sourceString}' to {targetType.Name} for column '{columnName}'";
+                        return DBNull.Value; // This will likely cause constraint violation
+                    }
                 }
             }
         }
-
+        
+        private object GetDefaultValueForType(Type targetType)
+        {
+            // Return appropriate default values for non-nullable types
+            if (targetType == typeof(int) || targetType == typeof(long) || targetType == typeof(short) || targetType == typeof(byte))
+            {
+                return 0;
+            }
+            else if (targetType == typeof(bool))
+            {
+                return false;
+            }
+            else if (targetType == typeof(decimal))
+            {
+                return 0.0m;
+            }
+            else if (targetType == typeof(double))
+            {
+                return 0.0d;
+            }
+            else if (targetType == typeof(DateTime))
+            {
+                return DateTime.Now; // Use current date for non-nullable DateTime columns
+            }
+            else if (targetType == typeof(Guid))
+            {
+                return Guid.NewGuid(); // Generate a new GUID instead of Empty
+            }
+            else if (targetType == typeof(string))
+            {
+                return ""; // Empty string for non-nullable string columns
+            }
+            else
+            {
+                return null; // No suitable default available
+            }
+        }
+        
         private async Task ExportData()
         {
             var selectedFormat = formatComboBox.SelectedItem.ToString();
@@ -1141,9 +1563,10 @@ namespace SqlServerManager.UI
 
         private async Task ExportToSql(DataTable dataTable)
         {
-            await Task.Run(() =>
+            await Task.Run(async () =>
             {
                 var encoding = GetSelectedEncoding();
+                var identityColumns = await GetIdentityColumns();
                 
                 using (var writer = new StreamWriter(filePathTextBox.Text, false, encoding))
                 {
@@ -1155,6 +1578,13 @@ namespace SqlServerManager.UI
                     {
                         var columnNames = dataTable.Columns.Cast<DataColumn>()
                             .Select(c => $"[{c.ColumnName}]").ToArray();
+
+                        // Add IDENTITY_INSERT ON if table has identity columns
+                        if (identityColumns.Count > 0)
+                        {
+                            writer.WriteLine($"SET IDENTITY_INSERT [{schemaName}].[{tableName}] ON;");
+                            writer.WriteLine();
+                        }
 
                         writer.WriteLine($"INSERT INTO [{schemaName}].[{tableName}]");
                         writer.WriteLine($"({string.Join(", ", columnNames)})");
@@ -1181,9 +1611,196 @@ namespace SqlServerManager.UI
 
                         writer.WriteLine(string.Join(",\n", valuesList));
                         writer.WriteLine(";");
+                        
+                        // Add IDENTITY_INSERT OFF if it was enabled
+                        if (identityColumns.Count > 0)
+                        {
+                            writer.WriteLine();
+                            writer.WriteLine($"SET IDENTITY_INSERT [{schemaName}].[{tableName}] OFF;");
+                        }
                     }
                 }
             });
+        }
+        
+        private async Task<List<string>> GetIdentityColumns()
+        {
+            var identityColumns = new List<string>();
+            
+            try
+            {
+                var query = $@"
+                    SELECT c.name AS ColumnName
+                    FROM sys.columns c
+                    INNER JOIN sys.tables t ON c.object_id = t.object_id
+                    INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+                    WHERE
+                        t.name = @tableName AND
+                        s.name = @schemaName AND
+                        c.is_identity = 1";
+                        
+                using (var command = new SqlCommand(query, connection))
+                {
+                    command.Parameters.AddWithValue("@tableName", tableName);
+                    command.Parameters.AddWithValue("@schemaName", schemaName);
+                    
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            identityColumns.Add(reader["ColumnName"].ToString());
+                        }
+                    }
+                }
+                
+                statusLabel.Text = $"Found {identityColumns.Count} identity columns";
+            }
+            catch (Exception ex)
+            {
+                statusLabel.Text = $"Error checking identity columns: {ex.Message}";
+            }
+            
+            return identityColumns;
+        }
+        
+        private async void LoadAvailableTables()
+        {
+            if (targetTableComboBox == null)
+                return;
+                
+            try
+            {
+                allTablesList.Clear();
+                targetTableComboBox.Items.Clear();
+                
+                var query = $@"
+                    USE [{databaseName}];
+                    SELECT 
+                        s.name AS SchemaName,
+                        t.name AS TableName
+                    FROM sys.tables t
+                    INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+                    WHERE t.is_ms_shipped = 0
+                    ORDER BY s.name, t.name";
+                
+                using (var command = new SqlCommand(query, connection))
+                using (var reader = await command.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        var schema = reader["SchemaName"].ToString();
+                        var table = reader["TableName"].ToString();
+                        var tableName = $"{schema}.{table}";
+                        allTablesList.Add(tableName);
+                        targetTableComboBox.Items.Add(tableName);
+                    }
+                }
+                
+                statusLabel.Text = $"Loaded {targetTableComboBox.Items.Count} available tables";
+                
+                if (targetTableComboBox.Items.Count > 0)
+                {
+                    // If a table was pre-selected, try to find and select it
+                    if (!string.IsNullOrEmpty(schemaName) && !string.IsNullOrEmpty(tableName))
+                    {
+                        var preselectedTable = $"{schemaName}.{tableName}";
+                        var index = -1;
+                        for (int i = 0; i < targetTableComboBox.Items.Count; i++)
+                        {
+                            if (targetTableComboBox.Items[i].ToString().Equals(preselectedTable, StringComparison.OrdinalIgnoreCase))
+                            {
+                                index = i;
+                                break;
+                            }
+                        }
+                        targetTableComboBox.SelectedIndex = index >= 0 ? index : 0;
+                    }
+                    else
+                    {
+                        targetTableComboBox.SelectedIndex = 0;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                statusLabel.Text = $"Error loading tables: {ex.Message}";
+                MessageBox.Show($"Error loading available tables: {ex.Message}", "Database Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+        
+        private void TargetTableComboBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (targetTableComboBox.SelectedItem != null)
+            {
+                var selectedTable = targetTableComboBox.SelectedItem.ToString();
+                var parts = selectedTable.Split('.');
+                
+                if (parts.Length == 2)
+                {
+                    schemaName = parts[0];
+                    tableName = parts[1];
+                    
+                    // Update the dialog title
+                    this.Text = $"{operation} Data - {schemaName}.{tableName}";
+                    
+                    // Load table preview if this is export operation
+                    if (operation == OperationType.Export)
+                    {
+                        LoadTableDataPreview();
+                    }
+                    
+                    statusLabel.Text = $"Selected table: {schemaName}.{tableName}";
+                }
+            }
+        }
+        
+        private async void ExecuteButton_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(filePathTextBox.Text))
+            {
+                MessageBox.Show("Please select a file path.", "File Required", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            
+            // Always validate table selection since we always show it now
+            if (string.IsNullOrEmpty(schemaName) || string.IsNullOrEmpty(tableName))
+            {
+                MessageBox.Show("Please select a target table.", "Table Required", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                executeButton.Enabled = false;
+                cancelButton.Text = "Cancel";
+                progressBar.Visible = true;
+                progressBar.Style = ProgressBarStyle.Marquee;
+
+                if (operation == OperationType.Export)
+                {
+                    await ExportData();
+                }
+                else if (operation == OperationType.Import)
+                {
+                    await ImportData();
+                }
+
+                this.DialogResult = DialogResult.OK;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Operation failed: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                executeButton.Enabled = true;
+                progressBar.Visible = false;
+                progressBar.Style = ProgressBarStyle.Continuous;
+            }
         }
     }
 }

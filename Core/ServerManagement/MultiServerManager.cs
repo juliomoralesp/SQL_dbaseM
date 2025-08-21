@@ -17,8 +17,6 @@ namespace SqlServerManager.Core.ServerManagement
         private TabControl resultsTabControl;
         private TextBox queryTextBox;
         private DataGridView serverStatusGrid;
-        private Panel queryPanel;
-        private Panel serverPanel;
         private SplitContainer mainSplitter;
         private ToolStrip toolbar;
         
@@ -28,7 +26,6 @@ namespace SqlServerManager.Core.ServerManagement
         private bool isMonitoringHealth = false;
         
         public event EventHandler<MultiServerQueryEventArgs> MultiQueryExecuted;
-        public event EventHandler<ServerHealthEventArgs> ServerHealthChanged;
         
         public MultiServerManager()
         {

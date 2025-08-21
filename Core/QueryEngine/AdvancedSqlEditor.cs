@@ -4,48 +4,86 @@ using System.Data;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Data.SqlClient;
+using ScintillaNET;
+using SqlServerManager.Services;
 using SqlServerManager.Core.Controls;
 
 namespace SqlServerManager.Core.QueryEngine
 {
+    /// <summary>
+    /// Advanced SQL editor with syntax highlighting, IntelliSense, and query execution
+    /// </summary>
     public partial class AdvancedSqlEditor : UserControl
     {
         private SimpleTextEditor sqlEditor;
+        
+        // Results UI components
         private TabControl resultsTabControl;
         private DataGridView resultsGrid;
         private TextBox messagesTextBox;
-        private Label statusLabel;
-        private ProgressBar executionProgress;
-        private Timer intelliSenseTimer;
         private TreeView executionPlanTree;
         private Panel performancePanel;
         private Label performanceLabel;
+        private ProgressBar executionProgress;
+        private Timer intelliSenseTimer;
+        private Label statusLabel;
         
+        // Data fields
         private string connectionString;
         private List<string> databaseObjects;
         private Dictionary<string, List<string>> tableColumns;
         
-        // SQL Keywords for IntelliSense
-        private readonly string[] sqlKeywords = {
+        private readonly ConnectionService _connectionService;
+        private readonly SqlIntelliSense _intelliSense;
+        
+        // SQL Keywords for highlighting
+        private readonly string[] SQL_KEYWORDS = {
             "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER",
-            "TABLE", "INDEX", "VIEW", "PROCEDURE", "FUNCTION", "TRIGGER", "DATABASE", "SCHEMA",
-            "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "ON", "GROUP", "ORDER", "BY",
-            "HAVING", "UNION", "INTERSECT", "EXCEPT", "AS", "DISTINCT", "TOP", "ASC", "DESC",
-            "AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE", "IS", "NULL", "COUNT", "SUM",
-            "AVG", "MIN", "MAX", "CASE", "WHEN", "THEN", "ELSE", "END", "IF", "WHILE", "BEGIN",
-            "COMMIT", "ROLLBACK", "TRANSACTION", "TRY", "CATCH", "THROW", "DECLARE", "SET"
+            "TABLE", "DATABASE", "INDEX", "VIEW", "PROCEDURE", "FUNCTION", "TRIGGER",
+            "AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE", "IS", "NULL",
+            "ORDER", "BY", "GROUP", "HAVING", "DISTINCT", "TOP", "LIMIT",
+            "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "JOIN", "ON", "CROSS",
+            "UNION", "INTERSECT", "EXCEPT", "ALL", "AS", "INTO", "VALUES",
+            "BEGIN", "END", "IF", "ELSE", "WHILE", "FOR", "CASE", "WHEN", "THEN"
         };
-        
-        public event EventHandler<QueryExecutedEventArgs> QueryExecuted;
-        
-        public AdvancedSqlEditor()
+
+        public AdvancedSqlEditor(ConnectionService connectionService)
         {
+            _connectionService = connectionService ?? throw new ArgumentNullException(nameof(connectionService));
+            _intelliSense = new SqlIntelliSense(connectionService);
+            
             InitializeComponent();
-            SetupIntelliSense();
-            LoadDatabaseSchema();
+            SetupSqlEditor();
+            SetupEventHandlers();
+            
+            // Subscribe to connection changes
+            _connectionService.ConnectionChanged += OnConnectionChanged;
+        }
+
+        public event EventHandler<QueryExecutedEventArgs> QueryExecuted;
+        public event EventHandler<string> StatusChanged;
+        
+        private void SetupEventHandlers()
+        {
+            // Setup IntelliSense timer
+            intelliSenseTimer = new Timer { Interval = 500 };
+            intelliSenseTimer.Tick += IntelliSenseTimer_Tick;
+            
+            // Additional event handler setup can be added here
+        }
+        
+        private void OnConnectionChanged(object sender, ConnectionEventArgs e)
+        {
+            connectionString = _connectionService.IsConnected ? "placeholder" : null; // We'll get actual connection string from service
+            if (!string.IsNullOrEmpty(connectionString))
+            {
+                LoadDatabaseSchema();
+            }
+            StatusChanged?.Invoke(this, e?.IsConnected == true ? "Connected" : "Disconnected");
         }
         
         private void InitializeComponent()
@@ -193,12 +231,6 @@ namespace SqlServerManager.Core.QueryEngine
             
             parent.Controls.Add(resultsTabControl);
             parent.Controls.Add(statusLabel);
-        }
-        
-        private void SetupIntelliSense()
-        {
-            intelliSenseTimer = new Timer { Interval = 500 };
-            intelliSenseTimer.Tick += IntelliSenseTimer_Tick;
         }
         
         private async void LoadDatabaseSchema()

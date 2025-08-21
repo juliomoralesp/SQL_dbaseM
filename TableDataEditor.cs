@@ -19,6 +19,7 @@ namespace SqlServerManager
         private DataTable currentData;
         private List<string> primaryKeyColumns;
         private Dictionary<string, string> columnTypes;
+        private List<string> identityColumns;
         
         private DataGridView dataGridView;
         private ToolStrip toolStrip;
@@ -43,6 +44,7 @@ namespace SqlServerManager
             tableName = table;
             primaryKeyColumns = new List<string>();
             columnTypes = new Dictionary<string, string>();
+            identityColumns = new List<string>();
             
             InitializeComponent();
             _ = Task.Run(async () =>
@@ -155,14 +157,20 @@ namespace SqlServerManager
                     }
                 }
 
-                // Get column data types
+                // Get column data types and identity columns
                 var typeQuery = $@"
                     USE [{databaseName}];
-                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH,
-                           NUMERIC_PRECISION, NUMERIC_SCALE
-                    FROM INFORMATION_SCHEMA.COLUMNS
-                    WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @table
-                    ORDER BY ORDINAL_POSITION";
+                    SELECT 
+                        c.COLUMN_NAME, 
+                        c.DATA_TYPE, 
+                        c.IS_NULLABLE, 
+                        c.CHARACTER_MAXIMUM_LENGTH,
+                        c.NUMERIC_PRECISION, 
+                        c.NUMERIC_SCALE,
+                        COLUMNPROPERTY(OBJECT_ID(QUOTENAME(c.TABLE_SCHEMA) + '.' + QUOTENAME(c.TABLE_NAME)), c.COLUMN_NAME, 'IsIdentity') as IS_IDENTITY
+                    FROM INFORMATION_SCHEMA.COLUMNS c
+                    WHERE c.TABLE_SCHEMA = @schema AND c.TABLE_NAME = @table
+                    ORDER BY c.ORDINAL_POSITION";
 
                 using (var command = new SqlCommand(typeQuery, connection))
                 {
@@ -177,8 +185,15 @@ namespace SqlServerManager
                             var dataType = reader["DATA_TYPE"].ToString();
                             var isNullable = reader["IS_NULLABLE"].ToString() == "YES";
                             var maxLength = reader["CHARACTER_MAXIMUM_LENGTH"];
+                            var isIdentity = Convert.ToBoolean(reader["IS_IDENTITY"]);
                             
                             columnTypes[columnName] = dataType;
+                            
+                            if (isIdentity)
+                            {
+                                identityColumns.Add(columnName);
+                                LoggingService.LogInformation($"Found identity column: '{columnName}'");
+                            }
                         }
                     }
                 }
@@ -394,6 +409,13 @@ namespace SqlServerManager
                 var row = dataGridView.Rows[e.RowIndex];
                 foreach (var pkColumn in primaryKeyColumns)
                 {
+                    // Skip validation for identity columns - they will be auto-generated
+                    if (identityColumns.Contains(pkColumn))
+                    {
+                        LoggingService.LogDebug($"Skipping validation for identity primary key column '{pkColumn}' - will be auto-generated");
+                        continue;
+                    }
+                    
                     var cell = row.Cells[pkColumn];
                     if (cell.Value == null || cell.Value == DBNull.Value || string.IsNullOrWhiteSpace(cell.Value.ToString()))
                     {
@@ -504,7 +526,7 @@ namespace SqlServerManager
                         MessageBox.Show("Changes saved successfully.", "Success", 
                             MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
-                    catch (Exception ex)
+                    catch (Exception)
                     {
                         transaction.Rollback();
                         throw;
@@ -595,53 +617,142 @@ namespace SqlServerManager
 
         private async Task ProcessInsertions(SqlTransaction transaction)
         {
-            foreach (var rowIndex in newRows)
+            if (newRows.Count == 0) return;
+            
+            bool identityInsertEnabled = false;
+            
+            try
             {
-                try
+                // SIMPLIFIED APPROACH: Enable IDENTITY_INSERT for any table that has identity columns
+                // This allows editing all fields including identity columns
+                bool needsIdentityInsert = identityColumns.Count > 0;
+                
+                LoggingService.LogInformation($"=== IDENTITY_INSERT DECISION ===");
+                LoggingService.LogInformation($"Processing {newRows.Count} new rows for insertion");
+                LoggingService.LogInformation($"Identity columns in table: [{string.Join(", ", identityColumns)}]");
+                LoggingService.LogInformation($"Table has identity columns: {identityColumns.Count > 0}");
+                LoggingService.LogInformation($"Decision: ALWAYS enable IDENTITY_INSERT when identity columns exist");
+                LoggingService.LogInformation($"Final decision: needsIdentityInsert = {needsIdentityInsert}");
+                
+                // Enable IDENTITY_INSERT if needed
+                if (needsIdentityInsert && identityColumns.Count > 0)
                 {
-                    if (rowIndex >= currentData.Rows.Count) continue;
+                    var identityInsertQuery = $"USE [{databaseName}]; SET IDENTITY_INSERT [{schemaName}].[{tableName}] ON";
+                    LoggingService.LogInformation($"Enabling IDENTITY_INSERT: {identityInsertQuery}");
                     
-                    var row = currentData.Rows[rowIndex];
-                    LoggingService.LogInformation($"Processing insertion for row {rowIndex}. Available columns: {string.Join(", ", currentData.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}");
-                    
-                    var columns = string.Join(", ", currentData.Columns.Cast<DataColumn>()
-                        .Select(c => $"[{c.ColumnName}]"));
-                    var values = string.Join(", ", currentData.Columns.Cast<DataColumn>()
-                        .Select(c => SanitizeParameterName(c.ColumnName, "")));
-                    
-                    var insertQuery = $"USE [{databaseName}]; INSERT INTO [{schemaName}].[{tableName}] ({columns}) VALUES ({values})";
-                    LoggingService.LogInformation($"Executing insert query: {insertQuery}");
-                    
-                    using (var command = new SqlCommand(insertQuery, connection, transaction))
+                    using (var identityCommand = new SqlCommand(identityInsertQuery, connection, transaction))
                     {
-                        foreach (DataColumn column in currentData.Columns)
-                        {
-                            try
-                            {
-                                if (!row.Table.Columns.Contains(column.ColumnName))
-                                {
-                                    LoggingService.LogError($"Column '{column.ColumnName}' does not exist in row. Available columns: {string.Join(", ", row.Table.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}");
-                                    continue;
-                                }
-                                
-                                var value = row[column] == DBNull.Value ? null : row[column];
-                                var paramName = SanitizeParameterName(column.ColumnName, "");
-                                LoggingService.LogDebug($"Adding INSERT parameter: {paramName} = {value ?? "NULL"}");
-                                command.Parameters.AddWithValue(paramName, value ?? DBNull.Value);
-                            }
-                            catch (Exception ex)
-                            {
-                                LoggingService.LogError($"Error adding INSERT parameter for column '{column.ColumnName}': {ex.Message}", ex);
-                                throw;
-                            }
-                        }
-                        await command.ExecuteNonQueryAsync();
+                        await identityCommand.ExecuteNonQueryAsync();
+                        identityInsertEnabled = true;
+                        LoggingService.LogInformation($"IDENTITY_INSERT enabled for table [{schemaName}].[{tableName}]");
                     }
                 }
-                catch (Exception ex)
+                
+                // Process each insertion
+                foreach (var rowIndex in newRows)
                 {
-                    LoggingService.LogError($"Error processing insertion for row {rowIndex}: {ex.Message}", ex);
-                    throw new Exception($"Error inserting row {rowIndex}: {ex.Message}", ex);
+                    try
+                    {
+                        if (rowIndex >= currentData.Rows.Count) continue;
+                        
+                        var row = currentData.Rows[rowIndex];
+                        
+                        // Enhanced debugging for identity column detection
+                        LoggingService.LogInformation($"=== PROCESSING INSERT FOR ROW {rowIndex} ===");
+                        LoggingService.LogInformation($"Processing insertion for row {rowIndex}. Available columns: {string.Join(", ", currentData.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}");
+                        LoggingService.LogInformation($"Identity columns detected: [{string.Join(", ", identityColumns)}]");
+                        LoggingService.LogInformation($"Primary key columns: [{string.Join(", ", primaryKeyColumns)}]");
+                        LoggingService.LogInformation($"IDENTITY_INSERT enabled: {identityInsertEnabled}");
+                        
+                        List<DataColumn> columnsToInclude;
+                        
+                        if (identityInsertEnabled)
+                        {
+                            // Include ALL columns when IDENTITY_INSERT is enabled
+                            columnsToInclude = currentData.Columns.Cast<DataColumn>().ToList();
+                            LoggingService.LogInformation($"Using all columns (IDENTITY_INSERT enabled): [{string.Join(", ", columnsToInclude.Select(c => c.ColumnName))}]");
+                        }
+                        else
+                        {
+                            // Exclude identity columns when IDENTITY_INSERT is disabled
+                            columnsToInclude = currentData.Columns.Cast<DataColumn>()
+                                .Where(c => !identityColumns.Contains(c.ColumnName))
+                                .ToList();
+                            LoggingService.LogInformation($"Using non-identity columns: [{string.Join(", ", columnsToInclude.Select(c => c.ColumnName))}]");
+                        }
+                        
+                        if (columnsToInclude.Count == 0)
+                        {
+                            LoggingService.LogWarning($"No columns available for INSERT on row {rowIndex}. Skipping insertion.");
+                            continue;
+                        }
+                            
+                        var columns = string.Join(", ", columnsToInclude
+                            .Select(c => $"[{c.ColumnName}]"));
+                        var values = string.Join(", ", columnsToInclude
+                            .Select(c => SanitizeParameterName(c.ColumnName, "")));
+                        
+                        var insertQuery = $"USE [{databaseName}]; INSERT INTO [{schemaName}].[{tableName}] ({columns}) VALUES ({values})";
+                        LoggingService.LogInformation($"Generated INSERT query: {insertQuery}");
+                        
+                        using (var command = new SqlCommand(insertQuery, connection, transaction))
+                        {
+                            // Add parameters for all included columns
+                            foreach (var column in columnsToInclude)
+                            {
+                                try
+                                {
+                                    if (!row.Table.Columns.Contains(column.ColumnName))
+                                    {
+                                        LoggingService.LogError($"Column '{column.ColumnName}' does not exist in row. Available columns: {string.Join(", ", row.Table.Columns.Cast<DataColumn>().Select(c => c.ColumnName))}");
+                                        continue;
+                                    }
+                                    
+                                    var value = row[column] == DBNull.Value ? null : row[column];
+                                    var paramName = SanitizeParameterName(column.ColumnName, "");
+                                    LoggingService.LogDebug($"Adding INSERT parameter: {paramName} = {value ?? "NULL"}");
+                                    command.Parameters.AddWithValue(paramName, value ?? DBNull.Value);
+                                }
+                                catch (Exception ex)
+                                {
+                                    LoggingService.LogError($"Error adding INSERT parameter for column '{column.ColumnName}': {ex.Message}", ex);
+                                    throw;
+                                }
+                            }
+                            
+                            LoggingService.LogInformation($"About to execute INSERT command with {command.Parameters.Count} parameters");
+                            await command.ExecuteNonQueryAsync();
+                            LoggingService.LogInformation($"INSERT executed successfully for row {rowIndex}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggingService.LogError($"Error processing insertion for row {rowIndex}: {ex.Message}", ex);
+                        throw new Exception($"Error inserting row {rowIndex}: {ex.Message}", ex);
+                    }
+                }
+            }
+            finally
+            {
+                // Always disable IDENTITY_INSERT if it was enabled
+                if (identityInsertEnabled && identityColumns.Count > 0)
+                {
+                    try
+                    {
+                        var identityInsertOffQuery = $"USE [{databaseName}]; SET IDENTITY_INSERT [{schemaName}].[{tableName}] OFF";
+                        LoggingService.LogInformation($"Disabling IDENTITY_INSERT: {identityInsertOffQuery}");
+                        
+                        using (var identityCommand = new SqlCommand(identityInsertOffQuery, connection, transaction))
+                        {
+                            await identityCommand.ExecuteNonQueryAsync();
+                            LoggingService.LogInformation($"IDENTITY_INSERT disabled for table [{schemaName}].[{tableName}]");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggingService.LogError($"Error disabling IDENTITY_INSERT: {ex.Message}", ex);
+                        // Don't throw here - we don't want to fail the entire transaction just because we couldn't disable IDENTITY_INSERT
+                    }
                 }
             }
         }

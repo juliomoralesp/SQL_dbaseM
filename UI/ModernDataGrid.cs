@@ -44,7 +44,6 @@ namespace SqlServerManager.UI
 
         public event EventHandler<PageChangedEventArgs> PageChanged;
         public event EventHandler<FilterChangedEventArgs> FilterChanged;
-        public event EventHandler<CellValueChangedEventArgs> CellValueChanged;
         public event EventHandler DataRefreshRequested;
         public event EventHandler DataExportRequested;
 
@@ -59,6 +58,75 @@ namespace SqlServerManager.UI
         public bool AllowExport { get; set; } = true;
         public bool ReadOnly { get; set; } = false;
         public bool ShowLineNumbers { get; set; } = true;
+        
+        // DataGridView compatibility properties
+        public bool AllowUserToAddRows 
+        { 
+            get => dataGridView?.AllowUserToAddRows ?? false; 
+            set { if (dataGridView != null) dataGridView.AllowUserToAddRows = value; }
+        }
+        
+        public bool AllowUserToDeleteRows 
+        { 
+            get => dataGridView?.AllowUserToDeleteRows ?? false; 
+            set { if (dataGridView != null) dataGridView.AllowUserToDeleteRows = value; }
+        }
+        
+        public DataGridViewSelectionMode SelectionMode 
+        { 
+            get => dataGridView?.SelectionMode ?? DataGridViewSelectionMode.CellSelect; 
+            set { if (dataGridView != null) dataGridView.SelectionMode = value; }
+        }
+        
+        public bool MultiSelect 
+        { 
+            get => dataGridView?.MultiSelect ?? false; 
+            set { if (dataGridView != null) dataGridView.MultiSelect = value; }
+        }
+        
+        public DataGridViewClipboardCopyMode ClipboardCopyMode 
+        { 
+            get => dataGridView?.ClipboardCopyMode ?? DataGridViewClipboardCopyMode.EnableWithAutoHeaderText; 
+            set { if (dataGridView != null) dataGridView.ClipboardCopyMode = value; }
+        }
+        
+        public DataGridViewAutoSizeColumnsMode AutoSizeColumnsMode 
+        { 
+            get => dataGridView?.AutoSizeColumnsMode ?? DataGridViewAutoSizeColumnsMode.DisplayedCells; 
+            set { if (dataGridView != null) dataGridView.AutoSizeColumnsMode = value; }
+        }
+        
+        public event DataGridViewBindingCompleteEventHandler DataBindingComplete
+        {
+            add { if (dataGridView != null) dataGridView.DataBindingComplete += value; }
+            remove { if (dataGridView != null) dataGridView.DataBindingComplete -= value; }
+        }
+        
+        public DataGridViewColumnCollection Columns 
+        { 
+            get => dataGridView?.Columns; 
+        }
+        
+        public DataGridViewCell CurrentCell 
+        { 
+            get => dataGridView?.CurrentCell; 
+            set { if (dataGridView != null) dataGridView.CurrentCell = value; }
+        }
+        
+        public DataGridViewSelectedRowCollection SelectedRows 
+        { 
+            get => dataGridView?.SelectedRows; 
+        }
+        
+        public DataObject GetClipboardContent()
+        {
+            return dataGridView?.GetClipboardContent();
+        }
+        
+        public void SelectAll()
+        {
+            dataGridView?.SelectAll();
+        }
 
         public int CurrentPage => currentPage;
         public int PageSize => pageSize;

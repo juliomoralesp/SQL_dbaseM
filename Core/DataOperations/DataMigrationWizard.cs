@@ -20,11 +20,10 @@ namespace SqlServerManager.Core.DataOperations
         
         private WizardStep currentStep = WizardStep.SourceSelection;
         private ImportSource selectedSource;
-        private ExportDestination selectedDestination;
         private string sourceFile;
         private string connectionString;
         private DataTable previewData;
-        private List<ColumnMapping> columnMappings;
+        private List<MigrationColumnMapping> columnMappings;
         private List<TransformationRule> transformationRules;
         
         private Panel wizardPanel;
@@ -45,7 +44,7 @@ namespace SqlServerManager.Core.DataOperations
         public DataMigrationWizard()
         {
             InitializeComponent();
-            columnMappings = new List<ColumnMapping>();
+            columnMappings = new List<MigrationColumnMapping>();
             transformationRules = new List<TransformationRule>();
             
             // Set EPPlus license context
@@ -231,7 +230,7 @@ namespace SqlServerManager.Core.DataOperations
                 Location = new Point(20, 30),
                 Size = new Size(100, 20)
             };
-            csvDestRadio.CheckedChanged += (s, e) => { if (csvDestRadio.Checked) selectedDestination = ExportDestination.CSV; };
+            // Note: Destination selection will be implemented in future version
             
             var excelDestRadio = new RadioButton
             {
@@ -239,7 +238,6 @@ namespace SqlServerManager.Core.DataOperations
                 Location = new Point(20, 60),
                 Size = new Size(100, 20)
             };
-            excelDestRadio.CheckedChanged += (s, e) => { if (excelDestRadio.Checked) selectedDestination = ExportDestination.Excel; };
             
             var databaseDestRadio = new RadioButton
             {
@@ -248,8 +246,6 @@ namespace SqlServerManager.Core.DataOperations
                 Size = new Size(120, 20),
                 Checked = true
             };
-            databaseDestRadio.CheckedChanged += (s, e) => { if (databaseDestRadio.Checked) selectedDestination = ExportDestination.Database; };
-            selectedDestination = ExportDestination.Database;
             
             var tableNameLabel = new Label
             {
@@ -744,7 +740,7 @@ namespace SqlServerManager.Core.DataOperations
             
             foreach (DataColumn column in previewData.Columns)
             {
-                columnMappings.Add(new ColumnMapping
+                columnMappings.Add(new MigrationColumnMapping
                 {
                     SourceColumn = column.ColumnName,
                     DestinationColumn = column.ColumnName,
@@ -842,7 +838,7 @@ namespace SqlServerManager.Core.DataOperations
         }
     }
     
-    public class ColumnMapping
+    public class MigrationColumnMapping
     {
         public string SourceColumn { get; set; }
         public string DestinationColumn { get; set; }
