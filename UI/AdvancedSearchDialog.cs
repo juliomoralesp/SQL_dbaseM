@@ -34,7 +34,6 @@ namespace SqlServerManager.UI
         private Button cancelButton;
         private DataGridView resultsGridView;
         private TreeView historyTreeView;
-        private TabControl mainTabControl;
         private ProgressBar searchProgressBar;
         private Label statusLabel;
         private SplitContainer mainSplitContainer;

@@ -227,7 +227,7 @@ namespace SqlServerManager
                 {
                     var adapter = new SqlDataAdapter(command);
                     originalData = new DataTable();
-                    adapter.Fill(originalData);
+                    await Task.Run(() => adapter.Fill(originalData));
                     
                     // Create a copy for editing
                     currentData = originalData.Copy();

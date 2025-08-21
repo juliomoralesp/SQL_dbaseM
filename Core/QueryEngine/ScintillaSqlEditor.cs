@@ -254,17 +254,17 @@ namespace SqlServerManager.Core.QueryEngine
 
         #region Event Handlers
 
-        private void SqlEditor_KeyDown(object sender, KeyEventArgs e)
+        private async void SqlEditor_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.KeyCode == Keys.F5)
             {
                 e.Handled = true;
-                ExecuteQuery();
+                await ExecuteQuery();
             }
             else if (e.KeyCode == Keys.Space && e.Control)
             {
                 e.Handled = true;
-                ShowIntelliSense();
+                await ShowIntelliSense();
             }
             else if (e.KeyCode == Keys.F && e.Control && e.Shift)
             {

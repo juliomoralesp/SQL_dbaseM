@@ -54,7 +54,6 @@ namespace SqlServerManager.UI
         private Button cancelButton;
         private ProgressBar progressBar;
         private Label statusLabel;
-        private Panel optionsPanel;
         private ComboBox targetTableComboBox;
         private Label targetTableLabel;
         private TextBox tableSearchTextBox;
