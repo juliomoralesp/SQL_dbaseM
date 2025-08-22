@@ -501,39 +501,38 @@ namespace SqlServerManager.UI
 
             using (var command = new SqlCommand(query, connection))
             {
-                using (var adapter = new SqlDataAdapter(command))
+                using (var reader = await command.ExecuteReaderAsync())
                 {
-                    var dataTable = new DataTable();
-                    adapter.Fill(dataTable);
-
-                    if (dataTable.Rows.Count > 0)
+                    var columnNames = new List<string>();
+                    for (int i = 0; i < reader.FieldCount; i++)
                     {
-                        var columnNames = dataTable.Columns.Cast<DataColumn>()
-                            .Select(c => $"[{c.ColumnName}]").ToArray();
+                        columnNames.Add($"[{reader.GetName(i)}]");
+                    }
 
+                    var valuesList = new List<string>();
+                    while (await reader.ReadAsync())
+                    {
+                        var values = new List<string>();
+                        for (int i = 0; i < reader.FieldCount; i++)
+                        {
+                            var value = reader.GetValue(i);
+                            if (value == DBNull.Value)
+                                values.Add("NULL");
+                            else if (value is string || value is DateTime)
+                                values.Add($"'{value.ToString().Replace("'", "''")}'");
+                            else if (value is bool)
+                                values.Add(((bool)value) ? "1" : "0");
+                            else
+                                values.Add(value.ToString());
+                        }
+                        valuesList.Add($"({string.Join(", ", values)})");
+                    }
+
+                    if (valuesList.Count > 0)
+                    {
                         script.AppendLine($"INSERT INTO [{schemaName}].[{tableName}]");
                         script.AppendLine($"({string.Join(", ", columnNames)})");
                         script.AppendLine("VALUES");
-
-                        var valuesList = new List<string>();
-
-                        foreach (DataRow row in dataTable.Rows)
-                        {
-                            var values = new List<string>();
-                            foreach (var item in row.ItemArray)
-                            {
-                                if (item == DBNull.Value)
-                                    values.Add("NULL");
-                                else if (item is string || item is DateTime)
-                                    values.Add($"'{item.ToString().Replace("'", "''")}'");
-                                else if (item is bool)
-                                    values.Add(((bool)item) ? "1" : "0");
-                                else
-                                    values.Add(item.ToString());
-                            }
-                            valuesList.Add($"({string.Join(", ", values)})");
-                        }
-
                         script.AppendLine(string.Join(",\n", valuesList));
                         script.AppendLine(";");
                     }

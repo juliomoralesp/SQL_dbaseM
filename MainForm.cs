@@ -563,9 +563,11 @@ namespace SqlServerManager
                 
                 using (var command = new SqlCommand(query, currentConnection))
                 {
-                    var adapter = new SqlDataAdapter(command);
                     var dataTable = new DataTable();
-                    adapter.Fill(dataTable);
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        dataTable.Load(reader);
+                    }
                     tablesGridView.DataSource = dataTable;
                     tablesLabel.Text = $"Tables in {databaseName}:";
                 }
@@ -2049,7 +2051,7 @@ namespace SqlServerManager
                             }
                             
                             // If it's a table, select it in the tables view
-                            if (!string.IsNullOrEmpty(result.ObjectName) && result.ObjectType == "TABLE")
+                            if (!string.IsNullOrEmpty(result.Table))
                             {
                                 mainTabControl.SelectedTab = tablesTab;
                                 
@@ -2057,7 +2059,7 @@ namespace SqlServerManager
                                 for (int i = 0; i < tablesGridView.Rows.Count; i++)
                                 {
                                     var row = tablesGridView.Rows[i];
-                                    if (row.Cells["Table Name"].Value?.ToString().Equals(result.ObjectName, StringComparison.OrdinalIgnoreCase) == true &&
+                                    if (row.Cells["Table Name"].Value?.ToString().Equals(result.Table, StringComparison.OrdinalIgnoreCase) == true &&
                                         row.Cells["Schema"].Value?.ToString().Equals(result.Schema, StringComparison.OrdinalIgnoreCase) == true)
                                     {
                                         tablesGridView.ClearSelection();
@@ -2069,7 +2071,7 @@ namespace SqlServerManager
                             }
                         }
                         
-                        enhancedStatusBar.ShowMessage($"Navigated to search result: {result.Schema}.{result.ObjectName}", MessageType.Info);
+                        enhancedStatusBar.ShowMessage($"Navigated to search result: {result.Schema}.{result.Table}.{result.Field}", MessageType.Info);
                     };
                     
                     searchDialog.ShowDialog();
@@ -2085,7 +2087,7 @@ namespace SqlServerManager
     }
     
     // Simple wrapper for ConnectionService to work with existing SqlConnection
-    public class SimpleConnectionService
+    public class SimpleConnectionService : Services.IConnectionService
     {
         private readonly SqlConnection _connection;
         private readonly string _currentDatabase;

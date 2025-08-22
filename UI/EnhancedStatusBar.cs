@@ -43,7 +43,7 @@ namespace SqlServerManager.UI
             {
                 Text = "No Connection",
                 AutoSize = false,
-                Width = 200,
+                Width = 280, // Increased from 200
                 TextAlign = ContentAlignment.MiddleLeft,
                 BorderSides = ToolStripStatusLabelBorderSides.Right
             };
@@ -53,7 +53,7 @@ namespace SqlServerManager.UI
             {
                 Text = "Ready",
                 AutoSize = false,
-                Width = 120,
+                Width = 180, // Increased from 120
                 TextAlign = ContentAlignment.MiddleLeft,
                 BorderSides = ToolStripStatusLabelBorderSides.Right
             };
@@ -63,7 +63,7 @@ namespace SqlServerManager.UI
             {
                 Text = "",
                 AutoSize = false,
-                Width = 100,
+                Width = 160, // Increased from 100
                 TextAlign = ContentAlignment.MiddleLeft,
                 BorderSides = ToolStripStatusLabelBorderSides.Right
             };
@@ -81,7 +81,7 @@ namespace SqlServerManager.UI
             {
                 Text = "Memory: 0 MB",
                 AutoSize = false,
-                Width = 100,
+                Width = 130, // Increased from 100
                 TextAlign = ContentAlignment.MiddleLeft,
                 BorderSides = ToolStripStatusLabelBorderSides.Right
             };
@@ -354,6 +354,46 @@ namespace SqlServerManager.UI
 
         #endregion
 
+        #region Search Results Methods
+        
+        public void SetSearchResults(int totalResults, int duplicatesSkipped = 0)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new Action(() => SetSearchResults(totalResults, duplicatesSkipped)));
+                return;
+            }
+
+            string text = $"{totalResults:N0} results";
+            if (duplicatesSkipped > 0)
+            {
+                text += $" ({duplicatesSkipped:N0} duplicates skipped)";
+            }
+            
+            _rowsAffectedLabel.Text = text;
+            _rowsAffectedLabel.Visible = true;
+        }
+        
+        public void SetOperationStatus(string operation, int processed, int duplicatesSkipped = 0)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new Action(() => SetOperationStatus(operation, processed, duplicatesSkipped)));
+                return;
+            }
+
+            string text = $"{processed:N0} {operation}";
+            if (duplicatesSkipped > 0)
+            {
+                text += $" ({duplicatesSkipped:N0} duplicates skipped)";
+            }
+            
+            _rowsAffectedLabel.Text = text;
+            _rowsAffectedLabel.Visible = true;
+        }
+        
+        #endregion
+        
         #region Message Methods
 
         public void ShowMessage(string message, MessageType type = MessageType.Info, int timeoutMs = 3000)

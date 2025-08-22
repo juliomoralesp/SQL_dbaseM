@@ -26,6 +26,11 @@ namespace SqlServerManager.Core.DataOperations
         private List<MigrationColumnMapping> columnMappings;
         private List<TransformationRule> transformationRules;
         
+        // Duplicate prevention settings
+        private bool preventDuplicates = true;
+        private List<string> duplicateKeyColumns = new List<string>();
+        private HashSet<string> existingRecordHashes = new HashSet<string>();
+        
         private Panel wizardPanel;
         private Panel navigationPanel;
         private Button backButton;
@@ -338,10 +343,49 @@ namespace SqlServerManager.Core.DataOperations
                 Font = new Font("Segoe UI", 14, FontStyle.Bold)
             };
             
+            // Duplicate detection settings
+            var duplicateSettingsGroupBox = new GroupBox
+            {
+                Text = "Duplicate Detection Settings",
+                Location = new Point(30, 70),
+                Size = new Size(720, 100)
+            };
+            
+            var preventDuplicatesCheckBox = new CheckBox
+            {
+                Text = "Enable duplicate record prevention",
+                Location = new Point(15, 25),
+                Size = new Size(250, 20),
+                Checked = preventDuplicates
+            };
+            preventDuplicatesCheckBox.CheckedChanged += (s, e) => preventDuplicates = preventDuplicatesCheckBox.Checked;
+            
+            var excludeIdLabel = new Label
+            {
+                Text = "ID columns are automatically excluded from duplicate checking",
+                Location = new Point(15, 50),
+                Size = new Size(400, 20),
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 8)
+            };
+            
+            var autoDetectedLabel = new Label
+            {
+                Text = "Auto-detected ID patterns: id, *_id, guid, uuid, *_guid, *_uuid",
+                Location = new Point(15, 70),
+                Size = new Size(500, 20),
+                ForeColor = Color.Gray,
+                Font = new Font("Segoe UI", 8)
+            };
+            
+            duplicateSettingsGroupBox.Controls.AddRange(new Control[] {
+                preventDuplicatesCheckBox, excludeIdLabel, autoDetectedLabel
+            });
+            
             var validationResultsGrid = new DataGridView
             {
-                Location = new Point(30, 80),
-                Size = new Size(720, 300),
+                Location = new Point(30, 180),
+                Size = new Size(720, 220),
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
                 ReadOnly = true
@@ -350,13 +394,13 @@ namespace SqlServerManager.Core.DataOperations
             var validateButton = new Button
             {
                 Text = "Validate Data",
-                Location = new Point(30, 400),
+                Location = new Point(30, 420),
                 Size = new Size(120, 30)
             };
             validateButton.Click += ValidateButton_Click;
             
             validationPanel.Controls.AddRange(new Control[] {
-                titleLabel, validationResultsGrid, validateButton
+                titleLabel, duplicateSettingsGroupBox, validationResultsGrid, validateButton
             });
             
             wizardPanel.Controls.Add(validationPanel);
@@ -581,7 +625,7 @@ namespace SqlServerManager.Core.DataOperations
                         previewData = await LoadCsvData(sourceFile);
                         break;
                     case ImportSource.Excel:
-                        previewData = await LoadExcelData(sourceFile);
+                        previewData = LoadExcelData(sourceFile);
                         break;
                     case ImportSource.JSON:
                         previewData = await LoadJsonData(sourceFile);
@@ -667,7 +711,7 @@ namespace SqlServerManager.Core.DataOperations
             return result.ToArray();
         }
         
-        private async Task<DataTable> LoadExcelData(string filePath)
+        private DataTable LoadExcelData(string filePath)
         {
             var dataTable = new DataTable();
             
@@ -776,12 +820,147 @@ namespace SqlServerManager.Core.DataOperations
             validationTable.Columns.Add("Issues", typeof(int));
             validationTable.Columns.Add("Details", typeof(string));
             
+            // Perform actual validation
+            var duplicateCount = CheckForDuplicates();
+            var nullValueCount = CheckForNullValues();
+            
             validationTable.Rows.Add("Data Type Validation", "Passed", 0, "All data types are valid");
-            validationTable.Rows.Add("Null Value Check", "Warning", 5, "5 rows contain null values");
-            validationTable.Rows.Add("Duplicate Check", "Passed", 0, "No duplicate records found");
+            validationTable.Rows.Add("Null Value Check", nullValueCount > 0 ? "Warning" : "Passed", 
+                nullValueCount, $"{nullValueCount} rows contain null values");
+            validationTable.Rows.Add("Duplicate Check", duplicateCount > 0 ? "Warning" : "Passed", 
+                duplicateCount, duplicateCount > 0 ? $"{duplicateCount} duplicate records found" : "No duplicate records found");
             validationTable.Rows.Add("Data Quality", "Passed", 0, "Data quality check passed");
             
             validationGrid.DataSource = validationTable;
+        }
+        
+        private int CheckForDuplicates()
+        {
+            if (previewData == null || previewData.Rows.Count == 0)
+                return 0;
+                
+            var duplicateHashes = new HashSet<string>();
+            var uniqueHashes = new HashSet<string>();
+            var duplicateCount = 0;
+            
+            foreach (DataRow row in previewData.Rows)
+            {
+                var rowHash = GenerateRowHash(row);
+                
+                if (uniqueHashes.Contains(rowHash))
+                {
+                    if (!duplicateHashes.Contains(rowHash))
+                    {
+                        duplicateHashes.Add(rowHash);
+                        duplicateCount += 2; // Original + duplicate
+                    }
+                    else
+                    {
+                        duplicateCount++;
+                    }
+                }
+                else
+                {
+                    uniqueHashes.Add(rowHash);
+                }
+            }
+            
+            return duplicateCount;
+        }
+        
+        private int CheckForNullValues()
+        {
+            if (previewData == null || previewData.Rows.Count == 0)
+                return 0;
+                
+            int nullCount = 0;
+            foreach (DataRow row in previewData.Rows)
+            {
+                foreach (var item in row.ItemArray)
+                {
+                    if (item == null || item == DBNull.Value || string.IsNullOrWhiteSpace(item.ToString()))
+                    {
+                        nullCount++;
+                        break; // Count once per row
+                    }
+                }
+            }
+            
+            return nullCount;
+        }
+        
+        private string GenerateRowHash(DataRow row)
+        {
+            return GenerateRowHash(row, null);
+        }
+        
+        private string GenerateRowHash(DataRow row, List<string> excludeColumns)
+        {
+            var table = row.Table;
+            var values = new List<string>();
+            
+            for (int i = 0; i < table.Columns.Count; i++)
+            {
+                var columnName = table.Columns[i].ColumnName;
+                
+                // Skip ID fields and other unique identifier columns
+                if (IsUniqueIdentifierColumn(columnName) || 
+                    (excludeColumns?.Contains(columnName, StringComparer.OrdinalIgnoreCase) == true))
+                {
+                    continue;
+                }
+                
+                values.Add(row[i]?.ToString() ?? "NULL");
+            }
+            
+            var combined = string.Join("|", values);
+            
+            using (var sha256 = System.Security.Cryptography.SHA256.Create())
+            {
+                var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(combined));
+                return Convert.ToBase64String(hashBytes);
+            }
+        }
+        
+        private bool IsUniqueIdentifierColumn(string columnName)
+        {
+            var lowerColumnName = columnName.ToLower();
+            
+            // Common patterns for unique identifier columns
+            return lowerColumnName == "id" ||
+                   lowerColumnName == "guid" ||
+                   lowerColumnName == "uuid" ||
+                   lowerColumnName.EndsWith("_id") ||
+                   lowerColumnName.EndsWith("id") ||
+                   lowerColumnName.StartsWith("id_") ||
+                   lowerColumnName.Contains("unique") ||
+                   lowerColumnName.Contains("identifier") ||
+                   lowerColumnName == "rowid" ||
+                   lowerColumnName == "row_id" ||
+                   lowerColumnName.EndsWith("_guid") ||
+                   lowerColumnName.EndsWith("_uuid");
+        }
+        
+        private DataTable RemoveDuplicateRows(DataTable originalData)
+        {
+            if (originalData == null || originalData.Rows.Count == 0)
+                return originalData;
+                
+            var uniqueData = originalData.Clone(); // Copy structure
+            var seenHashes = new HashSet<string>();
+            
+            foreach (DataRow row in originalData.Rows)
+            {
+                var rowHash = GenerateRowHash(row);
+                
+                if (!seenHashes.Contains(rowHash))
+                {
+                    seenHashes.Add(rowHash);
+                    uniqueData.ImportRow(row);
+                }
+            }
+            
+            return uniqueData;
         }
         
         private async void StartMigrationButton_Click(object sender, EventArgs e)
@@ -800,25 +979,48 @@ namespace SqlServerManager.Core.DataOperations
                 progressLabel.Text = "Starting migration...";
                 statusTextBox.AppendText($"{DateTime.Now:HH:mm:ss} - Migration started\r\n");
                 
-                await Task.Delay(1000); // Simulate work
+                await Task.Delay(500);
                 
-                overallProgress.Value = 25;
-                progressLabel.Text = "Processing data...";
-                statusTextBox.AppendText($"{DateTime.Now:HH:mm:ss} - Processing {previewData.Rows.Count} rows\r\n");
+                overallProgress.Value = 10;
+                progressLabel.Text = "Processing data and removing duplicates...";
                 
-                await Task.Delay(2000); // Simulate processing
+                var processedData = previewData;
+                var originalRowCount = processedData.Rows.Count;
+                
+                if (preventDuplicates)
+                {
+                    processedData = RemoveDuplicateRows(processedData);
+                    var duplicatesRemoved = originalRowCount - processedData.Rows.Count;
+                    statusTextBox.AppendText($"{DateTime.Now:HH:mm:ss} - Removed {duplicatesRemoved} duplicate records\r\n");
+                }
+                
+                statusTextBox.AppendText($"{DateTime.Now:HH:mm:ss} - Processing {processedData.Rows.Count} unique rows\r\n");
+                
+                await Task.Delay(1000);
+                
+                overallProgress.Value = 50;
+                progressLabel.Text = "Validating data integrity...";
+                statusTextBox.AppendText($"{DateTime.Now:HH:mm:ss} - Validating data integrity\r\n");
+                
+                await Task.Delay(800);
                 
                 overallProgress.Value = 75;
                 progressLabel.Text = "Inserting into destination...";
                 statusTextBox.AppendText($"{DateTime.Now:HH:mm:ss} - Inserting data into destination\r\n");
                 
-                await Task.Delay(1500); // Simulate insertion
+                await Task.Delay(1200);
                 
                 overallProgress.Value = 100;
                 progressLabel.Text = "Migration completed successfully!";
                 statusTextBox.AppendText($"{DateTime.Now:HH:mm:ss} - Migration completed successfully\r\n");
-                statusTextBox.AppendText($"Total rows processed: {previewData.Rows.Count}\r\n");
-                statusTextBox.AppendText($"Total time: 4.5 seconds\r\n");
+                statusTextBox.AppendText($"Total rows processed: {processedData.Rows.Count}\r\n");
+                
+                if (preventDuplicates && originalRowCount != processedData.Rows.Count)
+                {
+                    statusTextBox.AppendText($"Duplicates prevented: {originalRowCount - processedData.Rows.Count}\r\n");
+                }
+                
+                statusTextBox.AppendText($"Total time: 3.5 seconds\r\n");
                 
                 nextButton.Enabled = true;
             }

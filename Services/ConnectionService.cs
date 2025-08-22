@@ -10,7 +10,7 @@ namespace SqlServerManager.Services
     /// <summary>
     /// Service for managing SQL Server connections with proper disposal, retry policies, and connection pooling
     /// </summary>
-    public class ConnectionService : IDisposable
+    public class ConnectionService : IConnectionService, IDisposable
     {
         private readonly IConfiguration _configuration;
         // Retry policy removed for simplification

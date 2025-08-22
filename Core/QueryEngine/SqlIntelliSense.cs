@@ -128,11 +128,11 @@ namespace SqlServerManager.Core.QueryEngine
                         break;
                         
                     case CompletionContextType.TableName:
-                        completions.AddRange(await GetTableCompletions(context.PartialText, currentDatabase));
+                        completions.AddRange(GetTableCompletions(context.PartialText, currentDatabase));
                         break;
                         
                     case CompletionContextType.ColumnName:
-                        completions.AddRange(await GetColumnCompletions(context.PartialText, context.TableName, currentDatabase));
+                        completions.AddRange(GetColumnCompletions(context.PartialText, context.TableName, currentDatabase));
                         break;
                         
                     case CompletionContextType.DatabaseName:
@@ -148,7 +148,7 @@ namespace SqlServerManager.Core.QueryEngine
                         // Provide all types of completions
                         completions.AddRange(GetKeywordCompletions(context.PartialText));
                         completions.AddRange(GetFunctionCompletions(context.PartialText));
-                        completions.AddRange(await GetTableCompletions(context.PartialText, currentDatabase));
+                        completions.AddRange(GetTableCompletions(context.PartialText, currentDatabase));
                         break;
                 }
 
@@ -287,7 +287,7 @@ namespace SqlServerManager.Core.QueryEngine
         /// <summary>
         /// Get table name completions
         /// </summary>
-        private async Task<List<CompletionItem>> GetTableCompletions(string partialText, string databaseName)
+        private List<CompletionItem> GetTableCompletions(string partialText, string databaseName)
         {
             var completions = new List<CompletionItem>();
             
@@ -320,7 +320,7 @@ namespace SqlServerManager.Core.QueryEngine
         /// <summary>
         /// Get column name completions
         /// </summary>
-        private async Task<List<CompletionItem>> GetColumnCompletions(string partialText, string tableName, string databaseName)
+        private List<CompletionItem> GetColumnCompletions(string partialText, string tableName, string databaseName)
         {
             var completions = new List<CompletionItem>();
             

@@ -63,172 +63,263 @@ namespace SqlServerManager
 
         private void InitializeComponent()
         {
-            this.Text = "Connect to SQL Server";
-            this.Size = new Size(450, 450);
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-
-            // Saved connections
             savedConnectionsLabel = new Label();
-            savedConnectionsLabel.Text = "Recent Connections:";
-            savedConnectionsLabel.Location = new Point(20, 20);
-            savedConnectionsLabel.Size = new Size(120, 20);
-
             savedConnectionsComboBox = new ComboBox();
-            savedConnectionsComboBox.Location = new Point(140, 18);
-            savedConnectionsComboBox.Size = new Size(270, 25);
-            savedConnectionsComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
-            savedConnectionsComboBox.SelectedIndexChanged += SavedConnectionsComboBox_SelectedIndexChanged;
-
-            // Server
             serverLabel = new Label();
-            serverLabel.Text = "Server:";
-            serverLabel.Location = new Point(20, 60);
-            serverLabel.Size = new Size(100, 20);
-
             serverTextBox = new TextBox();
-            serverTextBox.Location = new Point(140, 58);
-            serverTextBox.Size = new Size(270, 25);
-            serverTextBox.Text = "localhost";
-
-            // Authentication
             authLabel = new Label();
-            authLabel.Text = "Authentication:";
-            authLabel.Location = new Point(20, 95);
-            authLabel.Size = new Size(100, 20);
-
             authenticationComboBox = new ComboBox();
-            authenticationComboBox.Location = new Point(140, 93);
-            authenticationComboBox.Size = new Size(270, 25);
-            authenticationComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
-            authenticationComboBox.Items.AddRange(new string[] { "Windows Authentication", "SQL Server Authentication" });
-            authenticationComboBox.SelectedIndex = 0;
-            authenticationComboBox.SelectedIndexChanged += AuthenticationComboBox_SelectedIndexChanged;
-
-            // Username
             usernameLabel = new Label();
-            usernameLabel.Text = "Username:";
-            usernameLabel.Location = new Point(20, 130);
-            usernameLabel.Size = new Size(100, 20);
-            usernameLabel.Enabled = false;
-
             usernameTextBox = new TextBox();
-            usernameTextBox.Location = new Point(140, 128);
-            usernameTextBox.Size = new Size(270, 25);
-            usernameTextBox.Enabled = false;
-
-            // Password
             passwordLabel = new Label();
-            passwordLabel.Text = "Password:";
-            passwordLabel.Location = new Point(20, 165);
-            passwordLabel.Size = new Size(100, 20);
-            passwordLabel.Enabled = false;
-
             passwordTextBox = new TextBox();
-            passwordTextBox.Location = new Point(140, 163);
-            passwordTextBox.Size = new Size(270, 25);
-            passwordTextBox.UseSystemPasswordChar = true;
-            passwordTextBox.Enabled = false;
-
-            // Save password
             savePasswordCheckBox = new CheckBox();
-            savePasswordCheckBox.Text = "Save password";
-            savePasswordCheckBox.Location = new Point(140, 195);
-            savePasswordCheckBox.Size = new Size(120, 25);
-            savePasswordCheckBox.Enabled = false;
-            
-            // Trust server certificate
             trustServerCertCheckBox = new CheckBox();
-            trustServerCertCheckBox.Text = "Trust server certificate";
-            trustServerCertCheckBox.Location = new Point(270, 195);
-            trustServerCertCheckBox.Size = new Size(140, 25);
-            trustServerCertCheckBox.Checked = true; // Default to true for easier setup
-
-            // Database (optional)
             databaseLabel = new Label();
-            databaseLabel.Text = "Database (optional):";
-            databaseLabel.Location = new Point(20, 230);
-            databaseLabel.Size = new Size(115, 20);
-
             databaseTextBox = new TextBox();
-            databaseTextBox.Location = new Point(140, 228);
-            databaseTextBox.Size = new Size(270, 25);
-            databaseTextBox.Text = "master";
-
-            // Connection Timeout
             timeoutLabel = new Label();
-            timeoutLabel.Text = "Connection Timeout (sec):";
-            timeoutLabel.Location = new Point(20, 260);
-            timeoutLabel.Size = new Size(130, 20);
-
             timeoutNumeric = new NumericUpDown();
-            timeoutNumeric.Location = new Point(150, 258);
-            timeoutNumeric.Size = new Size(80, 25);
-            timeoutNumeric.Minimum = 5;
-            timeoutNumeric.Maximum = 300;
-            timeoutNumeric.Value = 15;
-            timeoutNumeric.DecimalPlaces = 0;
-
-            // Progress Bar and Status
             connectionProgressBar = new ProgressBar();
+            statusLabel = new Label();
+            cancelConnectionButton = new Button();
+            testButton = new Button();
+            okButton = new Button();
+            cancelButton = new Button();
+            ((System.ComponentModel.ISupportInitialize)timeoutNumeric).BeginInit();
+            SuspendLayout();
+            // 
+            // savedConnectionsLabel
+            // 
+            savedConnectionsLabel.Location = new Point(20, 20);
+            savedConnectionsLabel.Name = "savedConnectionsLabel";
+            savedConnectionsLabel.Size = new Size(120, 20);
+            savedConnectionsLabel.TabIndex = 0;
+            savedConnectionsLabel.Text = "Recent Connections:";
+            // 
+            // savedConnectionsComboBox
+            // 
+            savedConnectionsComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            savedConnectionsComboBox.Location = new Point(140, 18);
+            savedConnectionsComboBox.Name = "savedConnectionsComboBox";
+            savedConnectionsComboBox.Size = new Size(270, 33);
+            savedConnectionsComboBox.TabIndex = 1;
+            savedConnectionsComboBox.SelectedIndexChanged += SavedConnectionsComboBox_SelectedIndexChanged;
+            // 
+            // serverLabel
+            // 
+            serverLabel.Location = new Point(20, 60);
+            serverLabel.Name = "serverLabel";
+            serverLabel.Size = new Size(100, 20);
+            serverLabel.TabIndex = 2;
+            serverLabel.Text = "Server:";
+            // 
+            // serverTextBox
+            // 
+            serverTextBox.Location = new Point(140, 58);
+            serverTextBox.Name = "serverTextBox";
+            serverTextBox.Size = new Size(270, 31);
+            serverTextBox.TabIndex = 3;
+            serverTextBox.Text = "localhost";
+            // 
+            // authLabel
+            // 
+            authLabel.Location = new Point(20, 95);
+            authLabel.Name = "authLabel";
+            authLabel.Size = new Size(100, 20);
+            authLabel.TabIndex = 4;
+            authLabel.Text = "Authentication:";
+            // 
+            // authenticationComboBox
+            // 
+            authenticationComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            authenticationComboBox.Items.AddRange(new object[] { "Windows Authentication", "SQL Server Authentication" });
+            authenticationComboBox.Location = new Point(140, 93);
+            authenticationComboBox.Name = "authenticationComboBox";
+            authenticationComboBox.Size = new Size(270, 33);
+            authenticationComboBox.TabIndex = 5;
+            authenticationComboBox.SelectedIndexChanged += AuthenticationComboBox_SelectedIndexChanged;
+            // 
+            // usernameLabel
+            // 
+            usernameLabel.Enabled = false;
+            usernameLabel.Location = new Point(20, 130);
+            usernameLabel.Name = "usernameLabel";
+            usernameLabel.Size = new Size(100, 20);
+            usernameLabel.TabIndex = 6;
+            usernameLabel.Text = "Username:";
+            // 
+            // usernameTextBox
+            // 
+            usernameTextBox.Enabled = false;
+            usernameTextBox.Location = new Point(140, 128);
+            usernameTextBox.Name = "usernameTextBox";
+            usernameTextBox.Size = new Size(270, 31);
+            usernameTextBox.TabIndex = 7;
+            // 
+            // passwordLabel
+            // 
+            passwordLabel.Enabled = false;
+            passwordLabel.Location = new Point(20, 165);
+            passwordLabel.Name = "passwordLabel";
+            passwordLabel.Size = new Size(100, 20);
+            passwordLabel.TabIndex = 8;
+            passwordLabel.Text = "Password:";
+            // 
+            // passwordTextBox
+            // 
+            passwordTextBox.Enabled = false;
+            passwordTextBox.Location = new Point(140, 163);
+            passwordTextBox.Name = "passwordTextBox";
+            passwordTextBox.Size = new Size(270, 31);
+            passwordTextBox.TabIndex = 9;
+            passwordTextBox.UseSystemPasswordChar = true;
+            // 
+            // savePasswordCheckBox
+            // 
+            savePasswordCheckBox.Enabled = false;
+            savePasswordCheckBox.Location = new Point(140, 195);
+            savePasswordCheckBox.Name = "savePasswordCheckBox";
+            savePasswordCheckBox.Size = new Size(120, 25);
+            savePasswordCheckBox.TabIndex = 10;
+            savePasswordCheckBox.Text = "Save password";
+            // 
+            // trustServerCertCheckBox
+            // 
+            trustServerCertCheckBox.Checked = true;
+            trustServerCertCheckBox.CheckState = CheckState.Checked;
+            trustServerCertCheckBox.Location = new Point(270, 195);
+            trustServerCertCheckBox.Name = "trustServerCertCheckBox";
+            trustServerCertCheckBox.Size = new Size(140, 25);
+            trustServerCertCheckBox.TabIndex = 11;
+            trustServerCertCheckBox.Text = "Trust server certificate";
+            // 
+            // databaseLabel
+            // 
+            databaseLabel.Location = new Point(20, 230);
+            databaseLabel.Name = "databaseLabel";
+            databaseLabel.Size = new Size(115, 20);
+            databaseLabel.TabIndex = 12;
+            databaseLabel.Text = "Database (optional):";
+            // 
+            // databaseTextBox
+            // 
+            databaseTextBox.Location = new Point(140, 228);
+            databaseTextBox.Name = "databaseTextBox";
+            databaseTextBox.Size = new Size(270, 31);
+            databaseTextBox.TabIndex = 13;
+            databaseTextBox.Text = "master";
+            // 
+            // timeoutLabel
+            // 
+            timeoutLabel.Location = new Point(20, 260);
+            timeoutLabel.Name = "timeoutLabel";
+            timeoutLabel.Size = new Size(130, 20);
+            timeoutLabel.TabIndex = 14;
+            timeoutLabel.Text = "Connection Timeout (sec):";
+            // 
+            // timeoutNumeric
+            // 
+            timeoutNumeric.Location = new Point(150, 258);
+            timeoutNumeric.Maximum = new decimal(new int[] { 300, 0, 0, 0 });
+            timeoutNumeric.Minimum = new decimal(new int[] { 5, 0, 0, 0 });
+            timeoutNumeric.Name = "timeoutNumeric";
+            timeoutNumeric.Size = new Size(80, 31);
+            timeoutNumeric.TabIndex = 15;
+            timeoutNumeric.Value = new decimal(new int[] { 15, 0, 0, 0 });
+            // 
+            // connectionProgressBar
+            // 
             connectionProgressBar.Location = new Point(20, 290);
+            connectionProgressBar.MarqueeAnimationSpeed = 50;
+            connectionProgressBar.Name = "connectionProgressBar";
             connectionProgressBar.Size = new Size(390, 20);
             connectionProgressBar.Style = ProgressBarStyle.Marquee;
-            connectionProgressBar.MarqueeAnimationSpeed = 50;
+            connectionProgressBar.TabIndex = 17;
             connectionProgressBar.Visible = false;
-
-            statusLabel = new Label();
-            statusLabel.Location = new Point(20, 315);
-            statusLabel.Size = new Size(390, 20);
-            statusLabel.Text = "Ready to connect";
+            // 
+            // statusLabel
+            // 
             statusLabel.ForeColor = Color.Gray;
-
-            // Cancel Connection Button (initially hidden)
-            cancelConnectionButton = new Button();
-            cancelConnectionButton.Text = "Cancel";
+            statusLabel.Location = new Point(20, 315);
+            statusLabel.Name = "statusLabel";
+            statusLabel.Size = new Size(390, 20);
+            statusLabel.TabIndex = 18;
+            statusLabel.Text = "Ready to connect";
+            // 
+            // cancelConnectionButton
+            // 
             cancelConnectionButton.Location = new Point(250, 258);
-            cancelConnectionButton.Size = new Size(80, 25);
+            cancelConnectionButton.Name = "cancelConnectionButton";
+            cancelConnectionButton.Size = new Size(80, 31);
+            cancelConnectionButton.TabIndex = 16;
+            cancelConnectionButton.Text = "Cancel";
             cancelConnectionButton.Visible = false;
             cancelConnectionButton.Click += CancelConnectionButton_Click;
-
-            // Buttons
-            testButton = new Button();
-            testButton.Text = "Test Connection";
+            // 
+            // testButton
+            // 
             testButton.Location = new Point(20, 350);
+            testButton.Name = "testButton";
             testButton.Size = new Size(120, 30);
+            testButton.TabIndex = 19;
+            testButton.Text = "Test Connection";
             testButton.Click += TestButton_Click;
-
-            okButton = new Button();
-            okButton.Text = "OK";
-            okButton.Location = new Point(240, 350);
-            okButton.Size = new Size(80, 30);
+            // 
+            // okButton
+            // 
             okButton.DialogResult = DialogResult.OK;
+            okButton.Location = new Point(240, 350);
+            okButton.Name = "okButton";
+            okButton.Size = new Size(80, 30);
+            okButton.TabIndex = 20;
+            okButton.Text = "OK";
             okButton.Click += OkButton_Click;
-
-            cancelButton = new Button();
-            cancelButton.Text = "Cancel";
-            cancelButton.Location = new Point(330, 350);
-            cancelButton.Size = new Size(80, 30);
+            // 
+            // cancelButton
+            // 
             cancelButton.DialogResult = DialogResult.Cancel;
-
-            // Add controls to form
-            this.Controls.AddRange(new Control[] {
-                savedConnectionsLabel, savedConnectionsComboBox,
-                serverLabel, serverTextBox,
-                authLabel, authenticationComboBox,
-                usernameLabel, usernameTextBox,
-                passwordLabel, passwordTextBox,
-                savePasswordCheckBox, trustServerCertCheckBox,
-                databaseLabel, databaseTextBox,
-                timeoutLabel, timeoutNumeric, cancelConnectionButton,
-                connectionProgressBar, statusLabel,
-                testButton, okButton, cancelButton
-            });
-
-            this.AcceptButton = okButton;
-            this.CancelButton = cancelButton;
+            cancelButton.Location = new Point(330, 350);
+            cancelButton.Name = "cancelButton";
+            cancelButton.Size = new Size(80, 30);
+            cancelButton.TabIndex = 21;
+            cancelButton.Text = "Cancel";
+            // 
+            // ConnectionDialog
+            // 
+            AcceptButton = okButton;
+            CancelButton = cancelButton;
+            ClientSize = new Size(428, 394);
+            Controls.Add(savedConnectionsLabel);
+            Controls.Add(savedConnectionsComboBox);
+            Controls.Add(serverLabel);
+            Controls.Add(serverTextBox);
+            Controls.Add(authLabel);
+            Controls.Add(authenticationComboBox);
+            Controls.Add(usernameLabel);
+            Controls.Add(usernameTextBox);
+            Controls.Add(passwordLabel);
+            Controls.Add(passwordTextBox);
+            Controls.Add(savePasswordCheckBox);
+            Controls.Add(trustServerCertCheckBox);
+            Controls.Add(databaseLabel);
+            Controls.Add(databaseTextBox);
+            Controls.Add(timeoutLabel);
+            Controls.Add(timeoutNumeric);
+            Controls.Add(cancelConnectionButton);
+            Controls.Add(connectionProgressBar);
+            Controls.Add(statusLabel);
+            Controls.Add(testButton);
+            Controls.Add(okButton);
+            Controls.Add(cancelButton);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            Name = "ConnectionDialog";
+            StartPosition = FormStartPosition.CenterParent;
+            Text = "Connect to SQL Server";
+            ((System.ComponentModel.ISupportInitialize)timeoutNumeric).EndInit();
+            ResumeLayout(false);
+            PerformLayout();
         }
 
         private void AuthenticationComboBox_SelectedIndexChanged(object sender, EventArgs e)
