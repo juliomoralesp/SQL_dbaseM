@@ -921,11 +921,15 @@ namespace SqlServerManager
             var importExportWizardMenuItem = new ToolStripMenuItem("Data Import/Export &Wizard...", null, ShowDataImportWizard_Click);
             var advancedSearchMenuItem = new ToolStripMenuItem("\u0026Advanced Search...", null, AdvancedSearchMenuItem_Click);
             advancedSearchMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.F;
+            var settingsMenuItem = new ToolStripMenuItem("&Settings...", null, Settings_Click);
+            settingsMenuItem.ShortcutKeys = Keys.Control | Keys.Comma;
             toolsMenu.DropDownItems.Add(scriptDatabaseMenuItem);
             toolsMenu.DropDownItems.Add(new ToolStripSeparator());
             toolsMenu.DropDownItems.Add(advancedSearchMenuItem);
             toolsMenu.DropDownItems.Add(new ToolStripSeparator());
             toolsMenu.DropDownItems.Add(importExportWizardMenuItem);
+            toolsMenu.DropDownItems.Add(new ToolStripSeparator());
+            toolsMenu.DropDownItems.Add(settingsMenuItem);
 
              // Help Menu
             var helpMenu = new ToolStripMenuItem("&Help");
@@ -2064,6 +2068,34 @@ namespace SqlServerManager
             {
                 MessageBox.Show($"Error opening Data Import Wizard: {ex.Message}", "Error", 
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+        
+        private void Settings_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                using (var settingsDialog = new UI.SettingsDialog())
+                {
+                    ThemeManager.ApplyThemeToDialog(settingsDialog);
+                    FontManager.ApplyFontSize(settingsDialog, currentFontScale);
+                    
+                    if (settingsDialog.ShowDialog() == DialogResult.OK)
+                    {
+                        // Settings have been saved by the dialog
+                        // Reload settings to apply any changes
+                        LoadSavedSettings();
+                        ApplyCurrentSettings();
+                        
+                        enhancedStatusBar.ShowMessage("Settings updated successfully", MessageType.Success);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening Settings dialog: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                LoggingService.LogError("Error opening Settings dialog: {Exception}", ex.Message);
             }
         }
         

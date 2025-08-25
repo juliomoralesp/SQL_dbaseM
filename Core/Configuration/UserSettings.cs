@@ -370,6 +370,12 @@ namespace SqlServerManager.Core.Configuration
         {
             lock (_lockObject)
             {
+                // Clear previous last connection flag
+                foreach (var conn in _settings.RecentConnections)
+                {
+                    conn.IsLastConnection = false;
+                }
+
                 var connection = _settings.RecentConnections.Find(c => 
                     c.Server.Equals(server, StringComparison.OrdinalIgnoreCase) &&
                     c.Database.Equals(database, StringComparison.OrdinalIgnoreCase));
@@ -378,6 +384,7 @@ namespace SqlServerManager.Core.Configuration
                 {
                     connection.LastUsed = DateTime.Now;
                     connection.UsageCount++;
+                    connection.IsLastConnection = true;
                     
                     // Move to front of list
                     _settings.RecentConnections.Remove(connection);
@@ -411,6 +418,23 @@ namespace SqlServerManager.Core.Configuration
             lock (_lockObject)
             {
                 return _settings.RecentConnections.FindAll(c => c.IsFavorite);
+            }
+        }
+
+        public RecentConnection GetLastConnection()
+        {
+            lock (_lockObject)
+            {
+                // First try to find the explicitly marked last connection
+                var lastConnection = _settings.RecentConnections.Find(c => c.IsLastConnection);
+                
+                // If not found, return the most recently used connection
+                if (lastConnection == null && _settings.RecentConnections.Count > 0)
+                {
+                    lastConnection = _settings.RecentConnections[0];
+                }
+                
+                return lastConnection;
             }
         }
 
