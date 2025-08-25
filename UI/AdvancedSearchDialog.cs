@@ -90,6 +90,63 @@ private ToolStrip resultsToolStrip;
             CreateHeaderPanel();
             CreateMainContent();
             SetupEventHandlers();
+            
+            // Safe way to set splitter after form is fully shown and sized
+            this.Shown += (s, e) => SetupSplitterAfterShow();
+        }
+
+        private void SetupSplitterAfterShow()
+        {
+            if (resultsSplitContainer == null) return;
+            
+            try
+            {
+                // Use BeginInvoke to ensure form is fully rendered and sized
+                this.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        var totalHeight = resultsSplitContainer.Height;
+                        var splitterWidth = resultsSplitContainer.SplitterWidth;
+                        var panel1MinSize = resultsSplitContainer.Panel1MinSize;
+                        var panel2MinSize = resultsSplitContainer.Panel2MinSize;
+                        
+                        // Calculate available space for splitting
+                        var availableHeight = totalHeight - splitterWidth;
+                        
+                        if (availableHeight > (panel1MinSize + panel2MinSize))
+                        {
+                            // Set splitter to approximately 60% for results, 40% for details
+                            var desiredPanel1Height = (int)(availableHeight * 0.6);
+                            
+                            // Ensure splitter distance is within valid bounds
+                            var minDistance = panel1MinSize;
+                            var maxDistance = totalHeight - panel2MinSize - splitterWidth;
+                            
+                            var splitterDistance = Math.Max(minDistance, Math.Min(maxDistance, desiredPanel1Height));
+                            
+                            LoggingService.LogDebug("Setting SplitterDistance: TotalHeight={TotalHeight}, AvailableHeight={AvailableHeight}, SplitterDistance={SplitterDistance}, MinDistance={MinDistance}, MaxDistance={MaxDistance}",
+                                totalHeight, availableHeight, splitterDistance, minDistance, maxDistance);
+                            
+                            resultsSplitContainer.SplitterDistance = splitterDistance;
+                            LoggingService.LogDebug("Successfully set SplitterDistance to {SplitterDistance}", splitterDistance);
+                        }
+                        else
+                        {
+                            LoggingService.LogWarning("Insufficient space for splitter: TotalHeight={TotalHeight}, Required={Required}", 
+                                totalHeight, panel1MinSize + panel2MinSize + splitterWidth);
+                        }
+                    }
+                    catch (Exception innerEx)
+                    {
+                        LoggingService.LogWarning("Inner error setting SplitterDistance: {Message}", innerEx.Message);
+                    }
+                }));
+            }
+            catch (Exception ex)
+            {
+                LoggingService.LogWarning("Error setting SplitterDistance: {Message}", ex.Message);
+            }
         }
 
         private void CreateHeaderPanel()

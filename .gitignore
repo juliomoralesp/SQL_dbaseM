@@ -328,3 +328,10 @@ node_modules/
 SqlServerManager-Standalone/
 NET8-Standalone/
 Properties/
+
+# Release artifacts and large binary files
+*.zip
+release-*/
+release-v*/
+SqlServerManager.exe
+SqlServerManager-*.exe

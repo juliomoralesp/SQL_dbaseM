@@ -29,9 +29,22 @@ namespace SqlServerManager.Core.Configuration
         public string Server { get; set; } = string.Empty;
         public string Database { get; set; } = string.Empty;
         public string AuthenticationType { get; set; } = "Windows";
+        public string Username { get; set; } = string.Empty;
+        public string EncryptedPassword { get; set; } = string.Empty;
         public DateTime LastUsed { get; set; } = DateTime.Now;
         public int UsageCount { get; set; } = 0;
         public bool IsFavorite { get; set; } = false;
+        public bool IsLastConnection { get; set; } = false;
+    }
+
+    public class AutoReconnectSettings
+    {
+        public bool EnableAutoReconnect { get; set; } = false;
+        public bool RememberLastConnection { get; set; } = true;
+        public int ReconnectTimeoutSeconds { get; set; } = 10;
+        public int MaxReconnectAttempts { get; set; } = 3;
+        public bool ShowReconnectDialog { get; set; } = true;
+        public bool AutoReconnectOnStartup { get; set; } = false;
     }
 
     public class WindowLayout
@@ -113,6 +126,9 @@ namespace SqlServerManager.Core.Configuration
         // Recent connections
         public List<RecentConnection> RecentConnections { get; set; } = new();
         public int MaxRecentConnections { get; set; } = 20;
+
+        // Auto-reconnect settings
+        public AutoReconnectSettings AutoReconnectSettings { get; set; } = new();
 
         // Query execution
         public QueryExecutionSettings QuerySettings { get; set; } = new();

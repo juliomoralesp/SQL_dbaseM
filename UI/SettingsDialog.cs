@@ -27,6 +27,12 @@ namespace SqlServerManager.UI
         private NumericUpDown maxRecentConnectionsNumeric;
         private CheckBox autoConnectCheckBox;
         private CheckBox validateConnectionsCheckBox;
+        private CheckBox enableAutoReconnectCheckBox;
+        private CheckBox rememberLastConnectionCheckBox;
+        private CheckBox autoReconnectOnStartupCheckBox;
+        private CheckBox showReconnectDialogCheckBox;
+        private NumericUpDown reconnectTimeoutNumeric;
+        private NumericUpDown maxReconnectAttemptsNumeric;
         
         // Editor tab controls
         private CheckBox enableSyntaxHighlightingCheckBox;
@@ -190,12 +196,14 @@ namespace SqlServerManager.UI
         private void CreateConnectionTab()
         {
             var tab = new TabPage("Connection");
+            var scrollPanel = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
             var panel = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
-                RowCount = 6,
+                Dock = DockStyle.Top,
+                RowCount = 12,
                 ColumnCount = 2,
-                Padding = new Padding(10)
+                Padding = new Padding(10),
+                AutoSize = true
             };
 
             // Connection timeout
@@ -228,9 +236,42 @@ namespace SqlServerManager.UI
                 Anchor = AnchorStyles.Left
             };
 
-            // Checkboxes
-            autoConnectCheckBox = new CheckBox { Text = "Auto-connect on startup", Anchor = AnchorStyles.Left };
+            // Basic connection checkboxes
+            autoConnectCheckBox = new CheckBox { Text = "Auto-connect on startup (deprecated)", Anchor = AnchorStyles.Left };
             validateConnectionsCheckBox = new CheckBox { Text = "Validate connections", Anchor = AnchorStyles.Left };
+
+            // Auto-reconnect section separator
+            var reconnectSeparator = new GroupBox
+            {
+                Text = "Auto-Reconnect Settings",
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                Height = 2,
+                FlatStyle = FlatStyle.Flat
+            };
+
+            // Auto-reconnect settings
+            enableAutoReconnectCheckBox = new CheckBox { Text = "Enable auto-reconnect", Anchor = AnchorStyles.Left };
+            rememberLastConnectionCheckBox = new CheckBox { Text = "Remember last connection", Anchor = AnchorStyles.Left };
+            autoReconnectOnStartupCheckBox = new CheckBox { Text = "Auto-reconnect on startup", Anchor = AnchorStyles.Left };
+            showReconnectDialogCheckBox = new CheckBox { Text = "Show reconnect dialog", Anchor = AnchorStyles.Left };
+
+            var reconnectTimeoutLabel = new Label { Text = "Reconnect timeout (seconds):", Anchor = AnchorStyles.Left };
+            reconnectTimeoutNumeric = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 60,
+                Value = 10,
+                Anchor = AnchorStyles.Left
+            };
+
+            var maxReconnectAttemptsLabel = new Label { Text = "Max reconnect attempts:", Anchor = AnchorStyles.Left };
+            maxReconnectAttemptsNumeric = new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 10,
+                Value = 3,
+                Anchor = AnchorStyles.Left
+            };
 
             panel.Controls.AddRange(new Control[]
             {
@@ -238,10 +279,18 @@ namespace SqlServerManager.UI
                 queryTimeoutLabel, queryTimeoutNumeric,
                 maxRecentLabel, maxRecentConnectionsNumeric,
                 autoConnectCheckBox, new Label(),
-                validateConnectionsCheckBox, new Label()
+                validateConnectionsCheckBox, new Label(),
+                reconnectSeparator, new Label(),
+                enableAutoReconnectCheckBox, new Label(),
+                rememberLastConnectionCheckBox, new Label(),
+                autoReconnectOnStartupCheckBox, new Label(),
+                showReconnectDialogCheckBox, new Label(),
+                reconnectTimeoutLabel, reconnectTimeoutNumeric,
+                maxReconnectAttemptsLabel, maxReconnectAttemptsNumeric
             });
 
-            tab.Controls.Add(panel);
+            scrollPanel.Controls.Add(panel);
+            tab.Controls.Add(scrollPanel);
             tabControl.TabPages.Add(tab);
         }
 
@@ -363,6 +412,14 @@ namespace SqlServerManager.UI
                 connectionTimeoutNumeric.Value = ConfigurationService.GetValue<int>("Database:DefaultConnectionTimeout", 15);
                 queryTimeoutNumeric.Value = ConfigurationService.GetValue<int>("Database:CommandTimeout", 30);
                 maxRecentConnectionsNumeric.Value = ConfigurationService.GetValue<int>("Application:MaxRecentConnections", 10);
+                
+                // Auto-reconnect settings
+                enableAutoReconnectCheckBox.Checked = ConfigurationService.GetValue<bool>("Connection:EnableAutoReconnect", false);
+                rememberLastConnectionCheckBox.Checked = ConfigurationService.GetValue<bool>("Connection:RememberLastConnection", true);
+                autoReconnectOnStartupCheckBox.Checked = ConfigurationService.GetValue<bool>("Connection:AutoReconnectOnStartup", false);
+                showReconnectDialogCheckBox.Checked = ConfigurationService.GetValue<bool>("Connection:ShowReconnectDialog", true);
+                reconnectTimeoutNumeric.Value = ConfigurationService.GetValue<int>("Connection:ReconnectTimeoutSeconds", 10);
+                maxReconnectAttemptsNumeric.Value = ConfigurationService.GetValue<int>("Connection:MaxReconnectAttempts", 3);
 
                 // Editor settings
                 var fontFamily = ConfigurationService.GetValue<string>("Editor:FontFamily", "Consolas");
@@ -410,6 +467,14 @@ namespace SqlServerManager.UI
                 ConfigurationService.SaveSetting("Database:DefaultConnectionTimeout", (int)connectionTimeoutNumeric.Value);
                 ConfigurationService.SaveSetting("Database:CommandTimeout", (int)queryTimeoutNumeric.Value);
                 ConfigurationService.SaveSetting("Application:MaxRecentConnections", (int)maxRecentConnectionsNumeric.Value);
+                
+                // Auto-reconnect settings
+                ConfigurationService.SaveSetting("Connection:EnableAutoReconnect", enableAutoReconnectCheckBox.Checked);
+                ConfigurationService.SaveSetting("Connection:RememberLastConnection", rememberLastConnectionCheckBox.Checked);
+                ConfigurationService.SaveSetting("Connection:AutoReconnectOnStartup", autoReconnectOnStartupCheckBox.Checked);
+                ConfigurationService.SaveSetting("Connection:ShowReconnectDialog", showReconnectDialogCheckBox.Checked);
+                ConfigurationService.SaveSetting("Connection:ReconnectTimeoutSeconds", (int)reconnectTimeoutNumeric.Value);
+                ConfigurationService.SaveSetting("Connection:MaxReconnectAttempts", (int)maxReconnectAttemptsNumeric.Value);
 
                 // Editor settings
                 ConfigurationService.SaveSetting("Editor:FontFamily", fontFamilyComboBox.SelectedItem?.ToString() ?? "Consolas");

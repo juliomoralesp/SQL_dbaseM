@@ -10,6 +10,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using SqlServerManager.UI;
+using SqlServerManager.Services;
+using SqlServerManager.Core.Configuration;
 
 namespace SqlServerManager
 {
@@ -41,6 +43,7 @@ namespace SqlServerManager
         private float currentFontScale = 1.2f; // Start with 20% larger fonts
         private SqlEditorControl sqlEditor;
         private KeyboardShortcutManager shortcutManager;
+        private AutoReconnectManager autoReconnectManager;
         
         // Public properties for keyboard shortcut integration
         public TabControl TabControl => mainTabControl;
@@ -61,6 +64,9 @@ namespace SqlServerManager
                 
                 ApplyCurrentSettings();
                 LogToFile("ApplyCurrentSettings completed.");
+                
+                // Attempt auto-reconnect on startup if enabled
+                TryAutoReconnectOnStartup();
                 
                 LogToFile("MainForm constructor completed successfully.");
             }
@@ -337,6 +343,24 @@ namespace SqlServerManager
             {
                 LoggingService.LogWarning("Failed to initialize keyboard shortcut manager: {Exception}", ex.Message);
             }
+            
+            // Initialize auto-reconnect manager
+            try
+            {
+                var connectionService = new SimpleConnectionService(null, null);
+                autoReconnectManager = new AutoReconnectManager(connectionService);
+                
+                // Set up event handlers for auto-reconnect events
+                autoReconnectManager.ReconnectAttempted += OnReconnectAttempted;
+                autoReconnectManager.ReconnectSucceeded += OnReconnectSucceeded;
+                autoReconnectManager.ReconnectFailed += OnReconnectFailed;
+                
+                LoggingService.LogInformation("AutoReconnectManager initialized");
+            }
+            catch (Exception ex)
+            {
+                LoggingService.LogWarning("Failed to initialize AutoReconnectManager: {Exception}", ex.Message);
+            }
         }
 
         private async void ConnectButton_Click(object sender, EventArgs e)
@@ -377,6 +401,17 @@ namespace SqlServerManager
                         
                         // Save successful connection
                         SaveConnection(currentConnectionString);
+                        
+                        // Notify AutoReconnectManager of successful connection
+                        try
+                        {
+                            var builder = new SqlConnectionStringBuilder(currentConnectionString);
+                            autoReconnectManager?.NotifyConnectionSucceeded(builder.DataSource, builder.InitialCatalog, currentConnectionString);
+                        }
+                        catch (Exception ex)
+                        {
+                            LogToFile($"Error notifying AutoReconnectManager of connection success: {ex.Message}");
+                        }
                         
                         // Update UI
                         connectionLabel.Text = $"Connected to: {currentConnection.DataSource}";
@@ -423,6 +458,16 @@ namespace SqlServerManager
 
         private void DisconnectButton_Click(object sender, EventArgs e)
         {
+            // Notify AutoReconnectManager of connection loss
+            try
+            {
+                autoReconnectManager?.NotifyConnectionLost();
+            }
+            catch (Exception ex)
+            {
+                LogToFile($"Error notifying AutoReconnectManager of connection loss: {ex.Message}");
+            }
+            
             // Close existing connection
             if (currentConnection != null && currentConnection.State == ConnectionState.Open)
             {
@@ -958,6 +1003,17 @@ namespace SqlServerManager
                 
                 // Save successful connection
                 SaveConnection(currentConnectionString);
+                
+                // Notify AutoReconnectManager of successful connection
+                try
+                {
+                    var builder = new SqlConnectionStringBuilder(currentConnectionString);
+                    autoReconnectManager?.NotifyConnectionSucceeded(builder.DataSource, builder.InitialCatalog, currentConnectionString);
+                }
+                catch (Exception ex)
+                {
+                    LogToFile($"Error notifying AutoReconnectManager of connection success: {ex.Message}");
+                }
                 
                 // Update UI
                 connectionLabel.Text = $"Connected to: {currentConnection.DataSource}";
@@ -2084,6 +2140,115 @@ namespace SqlServerManager
                 LoggingService.LogError("Error opening Advanced Search: {Exception}", ex.Message);
             }
         }
+        
+        // Auto-reconnect methods
+        private async void TryAutoReconnectOnStartup()
+        {
+            try
+            {
+                if (autoReconnectManager != null)
+                {
+                    var success = await autoReconnectManager.TryAutoReconnectOnStartupAsync();
+                    if (success)
+                    {
+                        LogToFile("Auto-reconnect on startup attempted");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogToFile($"Error during auto-reconnect on startup: {ex.Message}");
+            }
+        }
+        
+        private void OnReconnectAttempted(object sender, AutoReconnectEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new Action(() => OnReconnectAttempted(sender, e)));
+                return;
+            }
+            
+            var serverName = e.Connection?.Server ?? "Unknown";
+            enhancedStatusBar.ShowMessage($"Auto-reconnecting to {serverName}... (Attempt {e.AttemptNumber})", MessageType.Info);
+            LoggingService.LogInformation("Auto-reconnect attempt {AttemptNumber} to {ServerName}", e.AttemptNumber, serverName);
+        }
+        
+        private void OnReconnectSucceeded(object sender, AutoReconnectEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new Action(() => OnReconnectSucceeded(sender, e)));
+                return;
+            }
+            
+            try
+            {
+                var serverName = e.Connection?.Server ?? "Unknown";
+                var database = e.Connection?.Database ?? "Unknown";
+                
+                // Build connection string and create new connection
+                var builder = new SqlConnectionStringBuilder
+                {
+                    DataSource = e.Connection.Server,
+                    InitialCatalog = e.Connection.Database,
+                    IntegratedSecurity = e.Connection.AuthenticationType == "Windows",
+                    TrustServerCertificate = true,
+                    ConnectTimeout = 15
+                };
+                
+                if (!builder.IntegratedSecurity && !string.IsNullOrEmpty(e.Connection.Username))
+                {
+                    builder.UserID = e.Connection.Username;
+                }
+                
+                currentConnectionString = builder.ConnectionString;
+                currentConnection = new SqlConnection(currentConnectionString);
+                currentConnection.Open();
+                
+                connectionLabel.Text = $"Connected to: {currentConnection.DataSource}";
+                connectionLabel.ForeColor = Color.Green;
+                disconnectButton.Enabled = true;
+                refreshButton.Enabled = true;
+                importWizardButton.Enabled = true;
+                connectButton.Enabled = true;
+                
+                enhancedStatusBar.SetConnectionStatus(true, $"Auto-reconnected to: {currentConnection.DataSource}");
+                enhancedStatusBar.ShowMessage("Auto-reconnected successfully", MessageType.Success);
+                
+                // Update SQL Editor connection
+                if (sqlEditor != null)
+                {
+                    sqlEditor.UpdateConnection(currentConnection);
+                }
+                
+                // Load databases
+                LoadDatabases();
+                
+                LoggingService.LogInformation("Auto-reconnected successfully to {ServerName}", serverName);
+            }
+            catch (Exception ex)
+            {
+                LoggingService.LogError("Error updating UI after successful auto-reconnect: {Exception}", ex.Message);
+                enhancedStatusBar.ShowMessage("Auto-reconnect succeeded but UI update failed", MessageType.Warning);
+            }
+        }
+        
+        private void OnReconnectFailed(object sender, AutoReconnectEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new Action(() => OnReconnectFailed(sender, e)));
+                return;
+            }
+            
+            var serverName = e.Connection?.Server ?? "Unknown";
+            var errorMessage = e.Exception?.Message ?? "Connection failed";
+            
+            enhancedStatusBar.ShowMessage($"Auto-reconnect failed: {errorMessage}", MessageType.Error);
+            LoggingService.LogWarning("Auto-reconnect failed after {AttemptNumber} attempts to {ServerName}: {ErrorMessage}", 
+                e.AttemptNumber, serverName, errorMessage);
+        }
     }
     
     // Simple wrapper for ConnectionService to work with existing SqlConnection
@@ -2094,7 +2259,7 @@ namespace SqlServerManager
         
         public SimpleConnectionService(SqlConnection connection, string currentDatabase)
         {
-            _connection = connection ?? throw new ArgumentNullException(nameof(connection));
+            _connection = connection; // Allow null during initialization
             _currentDatabase = currentDatabase;
         }
         
